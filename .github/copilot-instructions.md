@@ -1,5 +1,18 @@
 # AI Agent Instructions - Hotel Cancellation Prediction
 
+## Project Context & Academic Foundation
+
+This is an **academic ML research project** (NIB 7072 coursework) developing a production-ready framework for predicting hotel booking cancellations, with specific focus on **Sri Lankan tourism market applications**. The project addresses the critical business challenge of perishable inventory in hospitality, where cancellation rates can cause 10-30% revenue losses.
+
+**Research Objectives:**
+
+- Comparative analysis of 4 ML paradigms (LogReg, RandomForest, XGBoost, PyTorch MLP)
+- SHAP-based model interpretability for actionable business insights
+- End-to-end MLOps pipeline from training to AWS deployment
+- Translation of predictions into Sri Lankan hospitality strategies
+
+**Future Vision:** Foundation for "Serendipity by Design" - a generative AI platform for narrative-driven cultural itineraries in Sri Lanka, using this model as a risk-assessment engine.
+
 ## Project Architecture
 
 This is a production-ready ML service for predicting hotel booking cancellations using a multi-model ensemble approach with MLflow experiment tracking and FastAPI REST endpoints.
@@ -13,9 +26,12 @@ This is a production-ready ML service for predicting hotel booking cancellations
 
 ### Key Architecture Decisions
 
-- **XGBoost as Production Default**: While 4 models are trained, only XGBoost is loaded for API predictions (see `load_model()` in main.py)
+- **XGBoost as Champion Model**: Based on academic evaluation, XGBoost achieved highest F1-score (0.893) and ROC-AUC (0.958) in 5-fold cross-validation
+- **Academic Rigor**: Models evaluated using stratified cross-validation with Optuna hyperparameter optimization
+- **Interpretability Focus**: SHAP (SHapley Additive exPlanations) used for model explainability and business insights
 - **Shared Preprocessing**: Single StandardScaler trained during model training, reused for API inference
-- **Synthetic Data Pipeline**: Training generates sample data internally rather than loading external datasets
+- **Feature Engineering**: Novel features created (total_stay_duration, is_family, guest_type) for enhanced predictive power
+- **Class Imbalance Handling**: 32.8% cancellation rate addressed using class weights rather than resampling
 
 ## Development Workflows
 
@@ -57,12 +73,24 @@ model = mlflow.xgboost.load_model("models/xgboost_model")  # Preferred
 # Fallback: model = joblib.load("models/xgboost_model.pkl")
 ```
 
-### Feature Schema Validation
+### Academic Evaluation Framework
+
+The project follows rigorous academic standards with specific evaluation methodology:
+
+- **Primary Metric**: F1-Score chosen for imbalanced classification (32.8% cancellation rate)
+- **Secondary Metrics**: ROC-AUC, Precision, Recall for comprehensive evaluation
+- **Cross-Validation**: 5-fold stratified to preserve class distribution
+- **Hyperparameter Optimization**: Optuna framework with Tree-structured Parzen Estimator (TPE)
+- **Experiment Tracking**: All runs logged to MLflow with parameters, metrics, and model artifacts
+
+### Feature Schema & Business Logic
 
 All booking features use Pydantic with explicit validation ranges (see `BookingFeatures` class):
 
-- Categorical constraints: `arrival_month` (1-12), `is_repeated_guest` (0-1)
-- Business logic: `adults >= 1`, all counts `>= 0`
+- **Key Predictors (SHAP-identified)**: `lead_time`, `avg_price_per_room`, `no_of_special_requests`, `market_segment_type`
+- **Categorical constraints**: `arrival_month` (1-12), `is_repeated_guest` (0-1)
+- **Business logic**: `adults >= 1`, all counts `>= 0`
+- **Engineered Features**: `total_stay_duration`, `is_family`, `guest_type` for enhanced prediction
 - Schema serves as both API contract and model input specification
 
 ### Environment Variable Strategy
