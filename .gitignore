@@ -58,3 +58,13 @@ Thumbs.db
 
 # Docker
 *.log
+
+# Reference documents and temporary files in .github
+.github/docs/
+.github/references/
+.github/notes/
+.github/temp/
+.github/*.pdf
+.github/*.docx
+.github/*.txt
+.github/*.md.bak

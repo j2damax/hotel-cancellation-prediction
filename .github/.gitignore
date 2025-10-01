@@ -1,0 +1,40 @@
+# .github directory specific ignores
+# This file controls what gets ignored specifically in the .github folder
+
+# Reference documents
+docs/
+references/
+notes/
+temp/
+scratch/
+
+# Document formats
+*.pdf
+*.docx
+*.doc
+*.txt
+*.rtf
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Personal notes
+personal-*
+draft-*
+TODO-*
+
+# Keep these important files (negation patterns)
+!copilot-instructions.md
+!workflows/
+!ISSUE_TEMPLATE/
+!PULL_REQUEST_TEMPLATE/
+!CODE_OF_CONDUCT.md
+!CONTRIBUTING.md
+!SECURITY.md
