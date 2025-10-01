@@ -239,9 +239,9 @@ def train_pytorch_mlp(X_train, y_train, X_test, y_test):
         mlflow.log_param("epochs", epochs)
         
         # Convert to PyTorch tensors
-        X_train_tensor = torch.FloatTensor(X_train)
+        X_train_tensor = torch.FloatTensor(X_train.values)
         y_train_tensor = torch.FloatTensor(y_train.values).reshape(-1, 1)
-        X_test_tensor = torch.FloatTensor(X_test)
+        X_test_tensor = torch.FloatTensor(X_test.values)
         y_test_tensor = torch.FloatTensor(y_test.values).reshape(-1, 1)
         
         # Create data loaders
