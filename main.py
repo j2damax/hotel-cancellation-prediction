@@ -11,7 +11,16 @@ import mlflow
 import joblib
 import os
 from typing import List, Optional
+from dotenv import load_dotenv
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Configuration from environment variables
+MODEL_PATH = os.getenv("MODEL_PATH", "models/")
+SCALER_PATH = os.getenv("SCALER_PATH", "models/scaler.pkl")
+MODEL_TYPE = os.getenv("MODEL_TYPE", "xgboost")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -81,18 +90,18 @@ def load_model_and_scaler():
     
     try:
         # Load scaler
-        scaler_path = "models/scaler.pkl"
-        if os.path.exists(scaler_path):
-            scaler = joblib.load(scaler_path)
-            print(f"✓ Scaler loaded from {scaler_path}")
+        if os.path.exists(SCALER_PATH):
+            scaler = joblib.load(SCALER_PATH)
+            print(f"✓ Scaler loaded from {SCALER_PATH}")
         else:
-            print(f"⚠ Scaler not found at {scaler_path}")
+            print(f"⚠ Scaler not found at {SCALER_PATH}")
             scaler = None
         
         # Try to load model from MLflow
         try:
             # Set MLflow tracking URI
-            mlflow.set_tracking_uri("file:./mlruns")
+            mlflow_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
+            mlflow.set_tracking_uri(mlflow_uri)
             
             # Try to load the latest XGBoost model
             # In production, you would specify a specific run_id or use model registry
