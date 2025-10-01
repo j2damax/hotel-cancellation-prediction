@@ -15,12 +15,15 @@ hotel-cancellation-prediction/
 │   └── processed/        # Processed data files
 ├── src/                  # Source code modules
 ├── scripts/
-│   └── train.py         # Training script for all models
+│   ├── train.py         # Training script for all models
+│   └── test_api.py      # API testing client
 ├── models/              # Saved models and artifacts
 ├── mlruns/              # MLflow experiment tracking data
 ├── main.py              # FastAPI application
 ├── Dockerfile           # Docker container configuration
+├── docker-compose.yml   # Docker Compose for local deployment
 ├── requirements.txt     # Python dependencies
+├── DEPLOYMENT.md        # AWS ECR deployment guide
 ├── .gitignore          # Git ignore rules
 └── README.md           # This file
 ```
@@ -115,6 +118,16 @@ Access the API:
 - Interactive Docs: http://localhost:8000/docs
 - Health Check: http://localhost:8000/health
 
+### Testing the API
+
+Use the provided test client:
+
+```bash
+python scripts/test_api.py
+```
+
+Or make manual requests (see examples below).
+
 ### Making Predictions
 
 Example using curl:
@@ -162,6 +175,27 @@ print(response.json())
 
 ## Docker Deployment
 
+### Using Docker Compose (Recommended for Local Testing)
+
+The easiest way to run the application locally with Docker:
+
+```bash
+# Start both API and MLflow UI
+docker-compose up
+
+# Or run in detached mode
+docker-compose up -d
+```
+
+This will start:
+- API server on http://localhost:8000
+- MLflow UI on http://localhost:5000
+
+To stop:
+```bash
+docker-compose down
+```
+
 ### Building the Docker Image
 
 ```bash
@@ -175,6 +209,10 @@ docker run -p 8000:8000 hotel-cancellation-prediction
 ```
 
 ### Deploying to Amazon ECR
+
+For detailed instructions on deploying to AWS ECR and running on ECS, EKS, or App Runner, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+Quick start:
 
 1. Authenticate Docker to ECR:
 ```bash
