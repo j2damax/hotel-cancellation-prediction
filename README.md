@@ -11,45 +11,85 @@ This project implements a complete machine learning pipeline for predicting hote
 ```
 hotel-cancellation-prediction/
 ├── data/
-│   ├── raw/              # Raw data files
-│   └── processed/        # Processed data files
-├── src/                  # Source code modules
-├── scripts/
-│   ├── train.py         # Training script for all models
-│   └── test_api.py      # API testing client
-├── models/              # Saved models and artifacts
+│   ├── raw/              # Raw hotel booking datasets
+│   ├── processed/        # Cleaned and preprocessed data
+│   └── features/         # Feature-engineered datasets ready for modeling
+├── notebooks/            # Jupyter notebooks for interactive analysis
+│   ├── 01_eda.ipynb                    # Exploratory Data Analysis
+│   ├── 02_preprocessing_analysis.ipynb # Preprocessing strategy comparison
+│   ├── 03_feature_engineering.ipynb   # Feature engineering experiments
+│   └── 04_model_evaluation.ipynb      # Model evaluation and SHAP analysis
+├── scripts/              # Production-ready Python scripts
+│   ├── train.py                # Training script for all models
+│   ├── preprocessing.py        # Data preprocessing pipeline
+│   ├── feature_engineering.py  # Feature engineering pipeline
+│   ├── model_evaluation.py     # Model evaluation and comparison
+│   └── test_api.py            # API testing client
+├── src/                  # Core source code modules
+├── models/              # Saved models and preprocessing artifacts
+├── results/             # Evaluation results and reports
 ├── mlruns/              # MLflow experiment tracking data
+├── .github/             # GitHub workflows and AI agent instructions
+│   └── copilot-instructions.md # Comprehensive AI agent guidance
 ├── main.py              # FastAPI application
 ├── Dockerfile           # Docker container configuration
 ├── docker-compose.yml   # Docker Compose for local deployment
-├── requirements.txt     # Python dependencies
+├── requirements.txt     # Python dependencies (enhanced for academic research)
 ├── DEPLOYMENT.md        # AWS ECR deployment guide
+├── QUICKSTART.md        # Quick start guide
+├── EDA.md              # Comprehensive EDA methodology (1,624 lines)
+├── preprocessing.md     # Preprocessing strategies guide (1,445 lines)
+├── features.md         # Feature engineering guide (1,653 lines)
 ├── .gitignore          # Git ignore rules
 └── README.md           # This file
 ```
 
 ## Features
 
+### Hybrid Architecture: Notebooks + Production Scripts
+
+This project implements a **hybrid approach** combining interactive analysis with production-ready pipelines:
+
+**📓 Jupyter Notebooks** (for research and analysis):
+- `01_eda.ipynb` - Interactive exploratory data analysis with visualizations
+- `02_preprocessing_analysis.ipynb` - Preprocessing strategy experimentation
+- `03_feature_engineering.ipynb` - Feature engineering with effectiveness testing
+- `04_model_evaluation.ipynb` - Model comparison with SHAP interpretability
+
+**🐍 Python Scripts** (for production deployment):
+- `preprocessing.py` - Automated data preprocessing pipeline
+- `feature_engineering.py` - Production feature engineering with cross-validation
+- `model_evaluation.py` - Comprehensive model evaluation with statistical testing
+- `train.py` - Complete training pipeline for deployment
+
+### Academic Research Framework
+
+- **NIB 7072 Coursework Compliance**: Rigorous academic standards with statistical significance testing
+- **Sri Lankan Tourism Focus**: Domain-specific features and business impact analysis  
+- **5-Fold Cross-Validation**: Stratified sampling with performance confidence intervals
+- **SHAP Interpretability**: Model explainability for actionable business insights
+- **Comprehensive Documentation**: 4,700+ lines of methodology documentation
+
 ### Machine Learning Models
 
-- **Logistic Regression**: Baseline linear model
-- **Random Forest**: Ensemble tree-based model
-- **XGBoost**: Gradient boosting model (default for API)
-- **PyTorch MLP**: Deep learning neural network
+- **Logistic Regression**: Baseline linear model with L1/L2 regularization
+- **Random Forest**: Ensemble tree-based model with optimized hyperparameters
+- **XGBoost**: Gradient boosting model (champion model with F1=0.893, ROC-AUC=0.958)
+- **PyTorch MLP**: Deep learning neural network with dropout and batch normalization
 
 ### MLflow Integration
 
-- Experiment tracking for all models
-- Automatic logging of parameters, metrics, and models
-- Model comparison and versioning
-- Easy model registry integration
+- Experiment tracking for all models with Optuna hyperparameter optimization
+- Automatic logging of parameters, metrics, and model artifacts
+- Model comparison and versioning with statistical significance testing
+- Easy model registry integration for production deployment
 
 ### FastAPI REST API
 
-- `/predict` - Single prediction endpoint
-- `/predict/batch` - Batch prediction endpoint
-- `/health` - Health check endpoint
-- Interactive API documentation at `/docs`
+- `/predict` - Single prediction endpoint with Pydantic validation
+- `/predict/batch` - Batch prediction endpoint for bulk processing
+- `/health` - Health check endpoint with model availability verification
+- Interactive API documentation at `/docs` with schema validation
 
 ### Docker Containerization
 
