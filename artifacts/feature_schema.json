@@ -1,0 +1,242 @@
+{
+  "created_utc": "2025-10-04T14:18:28.567462",
+  "schema": {
+    "hotel": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "lead_time": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "arrival_date_year": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "arrival_date_month": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "arrival_date_week_number": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "arrival_date_day_of_month": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "stays_in_weekend_nights": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "min": 0
+      }
+    },
+    "stays_in_week_nights": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "min": 0
+      }
+    },
+    "adults": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "min": 1
+      }
+    },
+    "children": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {
+        "min": 0
+      }
+    },
+    "babies": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "min": 0
+      }
+    },
+    "meal": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "country": {
+      "dtype": "object",
+      "nullable": false,
+      "constraints": {}
+    },
+    "market_segment": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "distribution_channel": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "is_repeated_guest": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "previous_cancellations": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "previous_bookings_not_canceled": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "reserved_room_type": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "assigned_room_type": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "booking_changes": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "deposit_type": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "days_in_waiting_list": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "customer_type": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "adr": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "required_car_parking_spaces": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "total_of_special_requests": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "total_stay_duration": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "min": 0
+      }
+    },
+    "total_guests": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "is_family": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "values": [
+          0,
+          1
+        ]
+      }
+    },
+    "guest_type": {
+      "dtype": "object",
+      "nullable": false,
+      "constraints": {}
+    },
+    "arrival_season": {
+      "dtype": "object",
+      "nullable": false,
+      "constraints": {}
+    },
+    "is_peak_season": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "values": [
+          0,
+          1
+        ]
+      }
+    },
+    "arrival_quarter": {
+      "dtype": "object",
+      "nullable": false,
+      "constraints": {}
+    },
+    "is_summer_peak": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "values": [
+          0,
+          1
+        ]
+      }
+    },
+    "is_holiday_season": {
+      "dtype": "int64",
+      "nullable": false,
+      "constraints": {
+        "values": [
+          0,
+          1
+        ]
+      }
+    },
+    "hotel_target_encoded": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "market_segment_target_encoded": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "distribution_channel_target_encoded": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "reserved_room_type_target_encoded": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    },
+    "customer_type_target_encoded": {
+      "dtype": "float64",
+      "nullable": false,
+      "constraints": {}
+    }
+  }
+}

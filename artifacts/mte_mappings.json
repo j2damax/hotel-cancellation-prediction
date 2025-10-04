@@ -1,0 +1,76 @@
+{
+  "created_utc": "2025-10-04T14:18:28.557206",
+  "target": "is_canceled",
+  "n_mappings": 5,
+  "encodings": {
+    "hotel": {
+      "encoded_column": "hotel_target_encoded",
+      "global_mean": 0.37041628277075134,
+      "categories": {
+        "0": 0.4172733063837846,
+        "1": 0.2776361457385911
+      },
+      "unique_categories": 2,
+      "correlation_with_target": 0.1362919003417029
+    },
+    "market_segment": {
+      "encoded_column": "market_segment_target_encoded",
+      "global_mean": 0.37041628277075134,
+      "categories": {
+        "0": 0.2193848011246842,
+        "1": 0.1305293327303513,
+        "2": 0.18735385096984933,
+        "3": 0.1534242478686866,
+        "4": 0.6106102590915212,
+        "5": 0.3431649262546367,
+        "6": 0.36721636358391,
+        "7": 0.6852081413853757
+      },
+      "unique_categories": 8,
+      "correlation_with_target": 0.26658119698812255
+    },
+    "distribution_channel": {
+      "encoded_column": "distribution_channel_target_encoded",
+      "global_mean": 0.37041628277075134,
+      "categories": {
+        "0": 0.22069913242602368,
+        "1": 0.1746080048040754,
+        "2": 0.19210634967836185,
+        "3": 0.41026163306920715,
+        "4": 0.5271752717065992
+      },
+      "unique_categories": 5,
+      "correlation_with_target": 0.17684471269279609
+    },
+    "reserved_room_type": {
+      "encoded_column": "reserved_room_type_target_encoded",
+      "global_mean": 0.37041628277075134,
+      "categories": {
+        "0": 0.3910688675887826,
+        "1": 0.329393513006855,
+        "2": 0.33002021600480985,
+        "3": 0.31777698548798844,
+        "4": 0.2929420080641847,
+        "5": 0.30377929173796275,
+        "6": 0.3643976188473718,
+        "7": 0.40771779125645363,
+        "8": 0.35811921762315374,
+        "9": 0.8114157473940412
+      },
+      "unique_categories": 10,
+      "correlation_with_target": 0.07241322555323557
+    },
+    "customer_type": {
+      "encoded_column": "customer_type_target_encoded",
+      "global_mean": 0.37041628277075134,
+      "categories": {
+        "0": 0.3096018755002309,
+        "1": 0.10226072646950485,
+        "2": 0.40746118084509414,
+        "3": 0.2543000402594656
+      },
+      "unique_categories": 4,
+      "correlation_with_target": 0.1362960500064263
+    }
+  }
+}

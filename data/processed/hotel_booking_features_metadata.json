@@ -1,0 +1,37 @@
+{
+  "started": "2025-10-04T14:18:26.583349",
+  "core_features_added": true,
+  "temporal_features_added": true,
+  "mean_target_encoding": {
+    "hotel": {
+      "encoded_column": "hotel_target_encoded",
+      "correlation_with_target": 0.1362919003417029,
+      "unique_categories": 2
+    },
+    "market_segment": {
+      "encoded_column": "market_segment_target_encoded",
+      "correlation_with_target": 0.26658119698812255,
+      "unique_categories": 8
+    },
+    "distribution_channel": {
+      "encoded_column": "distribution_channel_target_encoded",
+      "correlation_with_target": 0.17684471269279609,
+      "unique_categories": 5
+    },
+    "reserved_room_type": {
+      "encoded_column": "reserved_room_type_target_encoded",
+      "correlation_with_target": 0.07241322555323557,
+      "unique_categories": 10
+    },
+    "customer_type": {
+      "encoded_column": "customer_type_target_encoded",
+      "correlation_with_target": 0.1362960500064263,
+      "unique_categories": 4
+    }
+  },
+  "final_shape": [
+    119390,
+    42
+  ],
+  "completed": "2025-10-04T14:18:27.536773"
+}
