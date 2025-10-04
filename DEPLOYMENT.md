@@ -18,7 +18,7 @@ python scripts/train.py
 ```
 
 This will create:
-- `models/scaler.pkl` - Feature scaler
+- `models/preprocessor.pkl` - Unified preprocessing pipeline (scaling + categorical strategy)
 - `mlruns/` - MLflow tracking data with trained models
 
 ## Step 2: Configure AWS CLI

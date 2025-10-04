@@ -149,7 +149,7 @@ This will:
 - Generate sample hotel booking data
 - Train 4 different models (LogReg, RF, XGBoost, PyTorch MLP)
 - Log all experiments to MLflow
-- Save the scaler to `models/scaler.pkl`
+- Save the unified preprocessing artifact to `models/preprocessor.pkl`
 
 View MLflow UI to compare models:
 

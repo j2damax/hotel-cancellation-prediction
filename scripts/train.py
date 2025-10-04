@@ -4,6 +4,9 @@ Trains LogReg, Random Forest, XGBoost, and PyTorch MLP using MLflow.
 """
 
 import os
+import sys
+import json
+import argparse
 import numpy as np
 import pandas as pd
 import mlflow
@@ -15,6 +18,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+# Ensure project root is on path for 'src' package imports when executing as script
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+from src.preprocessing import PreprocessingPipeline
 import xgboost as xgb
 import torch
 import torch.nn as nn
@@ -46,53 +54,7 @@ class MLPClassifier(nn.Module):
         return self.model(x)
 
 
-def generate_sample_data(n_samples=10000):
-    """Generate sample hotel booking data for demonstration."""
-    np.random.seed(42)
-    
-    # Generate features
-    lead_time = np.random.randint(0, 365, n_samples)
-    arrival_month = np.random.randint(1, 13, n_samples)
-    stays_weekend = np.random.randint(0, 10, n_samples)
-    stays_week = np.random.randint(0, 20, n_samples)
-    adults = np.random.randint(1, 5, n_samples)
-    children = np.random.randint(0, 4, n_samples)
-    is_repeated = np.random.binomial(1, 0.3, n_samples)
-    previous_cancellations = np.random.poisson(0.2, n_samples)
-    booking_changes = np.random.poisson(0.3, n_samples)
-    adr = np.random.uniform(50, 300, n_samples)
-    required_parking = np.random.binomial(1, 0.2, n_samples)
-    special_requests = np.random.randint(0, 6, n_samples)
-    
-    # Generate target with some logic
-    cancellation_prob = (
-        0.1 * (lead_time > 100) +
-        0.15 * (previous_cancellations > 0) +
-        0.1 * (booking_changes > 1) +
-        0.05 * (required_parking == 0) +
-        0.1 * (is_repeated == 0) +
-        0.1
-    )
-    is_canceled = np.random.binomial(1, np.clip(cancellation_prob, 0, 1), n_samples)
-    
-    # Create DataFrame
-    data = pd.DataFrame({
-        'lead_time': lead_time,
-        'arrival_month': arrival_month,
-        'stays_weekend_nights': stays_weekend,
-        'stays_week_nights': stays_week,
-        'adults': adults,
-        'children': children,
-        'is_repeated_guest': is_repeated,
-        'previous_cancellations': previous_cancellations,
-        'booking_changes': booking_changes,
-        'adr': adr,
-        'required_car_parking_spaces': required_parking,
-        'total_of_special_requests': special_requests,
-        'is_canceled': is_canceled
-    })
-    
-    return data
+## NOTE: generate_sample_data removed. Training now requires engineered dataset to promote reproducibility and parity with API inference.
 
 
 def evaluate_model(y_true, y_pred, y_pred_proba=None):
@@ -110,12 +72,29 @@ def evaluate_model(y_true, y_pred, y_pred_proba=None):
     return metrics
 
 
+def _log_model_with_compat(module, model, signature, input_example):
+    """Log a model using new MLflow API (name=) with fallback to legacy artifact_path param.
+
+    This suppresses the deprecation warning: `artifact_path` is deprecated. Please use `name` instead.
+    """
+    try:  # Preferred new-style
+        module.log_model(model, signature=signature, input_example=input_example, name="model")
+    except TypeError:  # Older MLflow fallback
+        module.log_model(model, "model", signature=signature, input_example=input_example)
+
+
 def train_logistic_regression(X_train, y_train, X_test, y_test):
     """Train Logistic Regression model with MLflow tracking."""
     with mlflow.start_run(run_name="LogisticRegression"):
         # Log parameters
         mlflow.log_param("model_type", "LogisticRegression")
         mlflow.log_param("max_iter", 1000)
+        # Global preprocessing context if available
+        if 'PREPROCESSING_CONTEXT' in globals():
+            ctx = globals()['PREPROCESSING_CONTEXT']
+            mlflow.log_param('categorical_strategy', ctx.get('categorical_strategy'))
+            if ctx.get('categorical_strategy') == 'target':
+                mlflow.log_param('target_smoothing', ctx.get('target_smoothing'))
         
         # Train model
         model = LogisticRegression(max_iter=1000, random_state=42)
@@ -132,10 +111,21 @@ def train_logistic_regression(X_train, y_train, X_test, y_test):
         for metric_name, metric_value in metrics.items():
             mlflow.log_metric(metric_name, metric_value)
         
-        # Log model
-        mlflow.sklearn.log_model(model, "model")
+        # Log model with signature & example
+        from mlflow.models.signature import infer_signature
+        X_train_float = X_train.astype('float64')  # Ensure float schema to avoid integer missing value warnings
+        signature = infer_signature(X_train_float, model.predict_proba(X_train)[:, 1])
+        input_example = X_train_float.head(3)
+        _log_model_with_compat(mlflow.sklearn, model, signature, input_example)
         
-        print(f"LogisticRegression - Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
+        print(
+            "LogisticRegression - "
+            f"Acc: {metrics['accuracy']:.4f} | "
+            f"Prec: {metrics['precision']:.4f} | "
+            f"Rec: {metrics['recall']:.4f} | "
+            f"F1: {metrics['f1_score']:.4f} | "
+            f"ROC-AUC: {metrics.get('roc_auc', float('nan')):.4f}"
+        )
         
         return model
 
@@ -151,6 +141,11 @@ def train_random_forest(X_train, y_train, X_test, y_test):
         mlflow.log_param("model_type", "RandomForest")
         mlflow.log_param("n_estimators", n_estimators)
         mlflow.log_param("max_depth", max_depth)
+        if 'PREPROCESSING_CONTEXT' in globals():
+            ctx = globals()['PREPROCESSING_CONTEXT']
+            mlflow.log_param('categorical_strategy', ctx.get('categorical_strategy'))
+            if ctx.get('categorical_strategy') == 'target':
+                mlflow.log_param('target_smoothing', ctx.get('target_smoothing'))
         
         # Train model
         model = RandomForestClassifier(
@@ -172,10 +167,21 @@ def train_random_forest(X_train, y_train, X_test, y_test):
         for metric_name, metric_value in metrics.items():
             mlflow.log_metric(metric_name, metric_value)
         
-        # Log model
-        mlflow.sklearn.log_model(model, "model")
+        # Log model with signature & example
+        from mlflow.models.signature import infer_signature
+        X_train_float = X_train.astype('float64')
+        signature = infer_signature(X_train_float, model.predict_proba(X_train)[:, 1])
+        input_example = X_train_float.head(3)
+        _log_model_with_compat(mlflow.sklearn, model, signature, input_example)
         
-        print(f"RandomForest - Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
+        print(
+            "RandomForest - "
+            f"Acc: {metrics['accuracy']:.4f} | "
+            f"Prec: {metrics['precision']:.4f} | "
+            f"Rec: {metrics['recall']:.4f} | "
+            f"F1: {metrics['f1_score']:.4f} | "
+            f"ROC-AUC: {metrics.get('roc_auc', float('nan')):.4f}"
+        )
         
         return model
 
@@ -196,6 +202,11 @@ def train_xgboost(X_train, y_train, X_test, y_test):
         mlflow.log_param("model_type", "XGBoost")
         for param_name, param_value in params.items():
             mlflow.log_param(param_name, param_value)
+        if 'PREPROCESSING_CONTEXT' in globals():
+            ctx = globals()['PREPROCESSING_CONTEXT']
+            mlflow.log_param('categorical_strategy', ctx.get('categorical_strategy'))
+            if ctx.get('categorical_strategy') == 'target':
+                mlflow.log_param('target_smoothing', ctx.get('target_smoothing'))
         
         # Train model
         model = xgb.XGBClassifier(**params)
@@ -212,10 +223,21 @@ def train_xgboost(X_train, y_train, X_test, y_test):
         for metric_name, metric_value in metrics.items():
             mlflow.log_metric(metric_name, metric_value)
         
-        # Log model
-        mlflow.xgboost.log_model(model, "model")
+        # Log model with signature & example
+        from mlflow.models.signature import infer_signature
+        X_train_float = X_train.astype('float64')
+        signature = infer_signature(X_train_float, model.predict_proba(X_train)[:, 1])
+        input_example = X_train_float.head(3)
+        _log_model_with_compat(mlflow.xgboost, model, signature, input_example)
         
-        print(f"XGBoost - Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
+        print(
+            "XGBoost - "
+            f"Acc: {metrics['accuracy']:.4f} | "
+            f"Prec: {metrics['precision']:.4f} | "
+            f"Rec: {metrics['recall']:.4f} | "
+            f"F1: {metrics['f1_score']:.4f} | "
+            f"ROC-AUC: {metrics.get('roc_auc', float('nan')):.4f}"
+        )
         
         return model
 
@@ -237,6 +259,11 @@ def train_pytorch_mlp(X_train, y_train, X_test, y_test):
         mlflow.log_param("learning_rate", learning_rate)
         mlflow.log_param("batch_size", batch_size)
         mlflow.log_param("epochs", epochs)
+        if 'PREPROCESSING_CONTEXT' in globals():
+            ctx = globals()['PREPROCESSING_CONTEXT']
+            mlflow.log_param('categorical_strategy', ctx.get('categorical_strategy'))
+            if ctx.get('categorical_strategy') == 'target':
+                mlflow.log_param('target_smoothing', ctx.get('target_smoothing'))
         
         # Convert to PyTorch tensors
         X_train_tensor = torch.FloatTensor(X_train.values)
@@ -287,15 +314,70 @@ def train_pytorch_mlp(X_train, y_train, X_test, y_test):
             mlflow.log_metric(metric_name, metric_value)
         
         # Log model
-        mlflow.pytorch.log_model(model, "model")
+        from mlflow.models.signature import infer_signature
+        # Use probability outputs for signature inference
+        with torch.no_grad():
+            train_probs = model(torch.FloatTensor(X_train.values)).numpy().flatten()
+        X_train_float = X_train.astype('float64')
+        signature = infer_signature(X_train_float, train_probs)
+        input_example = X_train_float.head(3)
+        _log_model_with_compat(mlflow.pytorch, model, signature, input_example)
         
-        print(f"PyTorch_MLP - Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
+        print(
+            "PyTorch_MLP - "
+            f"Acc: {metrics['accuracy']:.4f} | "
+            f"Prec: {metrics['precision']:.4f} | "
+            f"Rec: {metrics['recall']:.4f} | "
+            f"F1: {metrics['f1_score']:.4f} | "
+            f"ROC-AUC: {metrics.get('roc_auc', float('nan')):.4f}"
+        )
         
         return model
 
 
+def load_engineered_dataset(features_path: str = 'data/processed/hotel_booking_features.csv',
+                            contract_path: str = 'artifacts/feature_contract.json',
+                            target: str = 'is_canceled'):
+    """Load engineered dataset using feature contract for column ordering.
+
+    Returns X (DataFrame), y (Series)
+    """
+    if not os.path.exists(features_path):
+        raise FileNotFoundError(f"Engineered features CSV not found: {features_path}. Run feature_engineering.py first.")
+    if not os.path.exists(contract_path):
+        raise FileNotFoundError(f"Feature contract not found: {contract_path}")
+    df = pd.read_csv(features_path)
+    with open(contract_path) as f:
+        contract = json.load(f)
+    feature_order = contract['feature_order']
+    missing = [c for c in feature_order if c not in df.columns]
+    if missing:
+        raise ValueError(f"Dataset missing contract columns: {missing}")
+    if target not in df.columns:
+        raise ValueError(f"Target column '{target}' not in engineered dataset")
+    # Preserve order from contract
+    X = df[feature_order].copy()
+    y = df[target].copy()
+    return X, y
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train models on synthetic or engineered dataset")
+    # Removed synthetic option; engineered dataset is now required for consistency.
+    parser.add_argument('--features-path', default='data/processed/hotel_booking_features.csv', help='Path to engineered features CSV')
+    parser.add_argument('--contract-path', default='artifacts/feature_contract.json', help='Path to feature_contract.json')
+    parser.add_argument('--target', default='is_canceled', help='Target column name')
+    parser.add_argument('--test-size', type=float, default=0.2, help='Test set fraction')
+    parser.add_argument('--no-scale', action='store_true', help='Skip scaling (e.g., for tree-only experiments)')
+    parser.add_argument('--limit-rows', type=int, default=None, help='Optional row limit for faster experimentation')
+    parser.add_argument('--categorical-strategy', choices=['drop', 'onehot', 'target'], default='drop', help='Categorical handling strategy: drop | onehot | target (mean target encoding).')
+    parser.add_argument('--preprocessor-path', default='models/preprocessor.pkl', help='Path to save fitted preprocessing pipeline.')
+    return parser.parse_args()
+
+
 def main():
     """Main training pipeline."""
+    args = parse_args()
     print("=" * 80)
     print("Hotel Cancellation Prediction - Model Training")
     print("=" * 80)
@@ -306,50 +388,62 @@ def main():
     
     # Generate or load data
     print("\n1. Loading data...")
-    data = generate_sample_data(n_samples=10000)
-    print(f"   Data shape: {data.shape}")
-    print(f"   Cancellation rate: {data['is_canceled'].mean():.2%}")
-    
-    # Split features and target
-    X = data.drop('is_canceled', axis=1)
-    y = data['is_canceled']
+    X, y = load_engineered_dataset(args.features_path, args.contract_path, args.target)
+    if args.limit_rows:
+        X = X.head(args.limit_rows)
+        y = y.head(args.limit_rows)
+    print(f"   Loaded engineered dataset: X={X.shape}, y={y.shape}")
     
     # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     
-    # Scale features
-    print("\n2. Scaling features...")
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Convert back to DataFrame for consistency
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
-    
-    # Save scaler
-    import joblib
-    os.makedirs("models", exist_ok=True)
-    joblib.dump(scaler, "models/scaler.pkl")
-    print("   Scaler saved to models/scaler.pkl")
+    # Centralized preprocessing
+    print("\n2. Preprocessing features with centralized pipeline...")
+    preprocessor = PreprocessingPipeline(
+        categorical_strategy=args.categorical_strategy,
+        scale=not args.no_scale
+    )
+    # For target encoding strategy we must pass y
+    if args.categorical_strategy == 'target':
+        X_train_processed = preprocessor.fit_transform(X_train, y_train)
+    else:
+        X_train_processed = preprocessor.fit_transform(X_train)
+    X_test_processed = preprocessor.transform(X_test)
+    preprocessor.save(args.preprocessor_path)
+    print(f"   Preprocessor saved -> {args.preprocessor_path} | Remaining features: {X_train_processed.shape[1]}")
+    # Expose minimal preprocessing context globally for model trainers to log
+    globals()['PREPROCESSING_CONTEXT'] = {
+        'categorical_strategy': preprocessor.categorical_strategy,
+        'target_smoothing': getattr(preprocessor, 'target_smoothing', None)
+    }
+    if preprocessor.state and preprocessor.state.dropped_columns:
+        os.makedirs('artifacts', exist_ok=True)
+        with open('artifacts/dropped_columns.json', 'w') as f:
+            json.dump({
+                'timestamp': pd.Timestamp.utcnow().isoformat(),
+                'categorical_strategy': preprocessor.state.categorical_strategy,
+                'dropped_columns': preprocessor.state.dropped_columns,
+                'remaining_feature_count': len(preprocessor.state.feature_order)
+            }, f, indent=2)
+        print("   Dropped columns artifact saved -> artifacts/dropped_columns.json")
     
     # Train models
     print("\n3. Training models...")
     print("-" * 80)
     
     print("\n   Training Logistic Regression...")
-    lr_model = train_logistic_regression(X_train_scaled, y_train, X_test_scaled, y_test)
+    lr_model = train_logistic_regression(X_train_processed, y_train, X_test_processed, y_test)
     
     print("\n   Training Random Forest...")
-    rf_model = train_random_forest(X_train_scaled, y_train, X_test_scaled, y_test)
+    rf_model = train_random_forest(X_train_processed, y_train, X_test_processed, y_test)
     
     print("\n   Training XGBoost...")
-    xgb_model = train_xgboost(X_train_scaled, y_train, X_test_scaled, y_test)
+    xgb_model = train_xgboost(X_train_processed, y_train, X_test_processed, y_test)
     
     print("\n   Training PyTorch MLP...")
-    mlp_model = train_pytorch_mlp(X_train_scaled, y_train, X_test_scaled, y_test)
+    mlp_model = train_pytorch_mlp(X_train_processed, y_train, X_test_processed, y_test)
     
     print("\n" + "=" * 80)
     print("Training completed! Check MLflow UI with: mlflow ui")

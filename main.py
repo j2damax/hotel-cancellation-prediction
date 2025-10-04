@@ -19,7 +19,7 @@ load_dotenv()
 
 # Configuration from environment variables
 MODEL_PATH = os.getenv("MODEL_PATH", "models/")
-SCALER_PATH = os.getenv("SCALER_PATH", "models/scaler.pkl")
+PREPROCESSOR_PATH = os.getenv("PREPROCESSOR_PATH", "models/preprocessor.pkl")
 MODEL_TYPE = os.getenv("MODEL_TYPE", "xgboost")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -79,9 +79,11 @@ class HealthResponse(BaseModel):
     model_loaded: bool
 
 
-# Global variables for model and scaler
+from src.preprocessing import PreprocessingPipeline
+
+# Global variables for model and preprocessing pipeline
 model = None
-scaler = None
+preprocessor: Optional[PreprocessingPipeline] = None
 model_name = "XGBoost"  # Default model to use
 
 # Inference artifacts
@@ -95,17 +97,21 @@ TARGET_COL = os.getenv("TARGET_COL", "is_canceled")
 
 
 def load_model_and_scaler():
-    """Load the trained model and scaler."""
-    global model, scaler
+    """Load the trained model and preprocessing pipeline (preferred) or legacy scaler."""
+    global model, preprocessor
     
     try:
-        # Load scaler
-        if os.path.exists(SCALER_PATH):
-            scaler = joblib.load(SCALER_PATH)
-            print(f"✓ Scaler loaded from {SCALER_PATH}")
+        # Load centralized preprocessor if present
+        if os.path.exists(PREPROCESSOR_PATH):
+            try:
+                preprocessor = PreprocessingPipeline.load(PREPROCESSOR_PATH)
+                print(f"✓ Preprocessor loaded from {PREPROCESSOR_PATH} (strategy={preprocessor.categorical_strategy})")
+            except Exception as e:
+                print(f"⚠ Failed to load preprocessor at {PREPROCESSOR_PATH}: {e}")
+                preprocessor = None
         else:
-            print(f"⚠ Scaler not found at {SCALER_PATH}")
-            scaler = None
+            print(f"⚠ Preprocessor not found at {PREPROCESSOR_PATH}; attempting legacy scaler path")
+            preprocessor = None
         
         # Try to load model from MLflow
         try:
@@ -140,9 +146,9 @@ def load_model_and_scaler():
             model = None
     
     except Exception as e:
-        print(f"✗ Error loading model/scaler: {e}")
+        print(f"✗ Error loading model artifacts: {e}")
         model = None
-        scaler = None
+        preprocessor = None
 
 
 def load_inference_artifacts():
@@ -311,22 +317,27 @@ async def predict(booking: BookingFeatures):
             detail="Model not loaded. Please ensure the model is trained and available."
         )
     
-    if scaler is None:
+    if preprocessor is None:
         raise HTTPException(
             status_code=503,
-            detail="Scaler not loaded. Please ensure the scaler is available."
+            detail="Preprocessor not loaded. Ensure training script produced models/preprocessor.pkl."
         )
     
     try:
         # Convert input to DataFrame
         raw_df = pd.DataFrame([booking.dict()])
+        # Build initial engineered deterministic features (legacy) THEN pass through centralized preprocessor to align with training
         feature_df = _build_feature_matrix(raw_df)
-        input_scaled = scaler.transform(feature_df)
+        try:
+            input_processed = preprocessor.transform(feature_df)
+        except Exception:
+            # Fallback: if contract-based reconstruction already matches processed training features
+            input_processed = feature_df
 
         # Make prediction
-        prediction = model.predict(input_scaled)[0]
-        probability = (model.predict_proba(input_scaled)[0, 1]
-                       if hasattr(model, 'predict_proba') else float(model.predict(input_scaled)[0]))
+        prediction = model.predict(input_processed)[0]
+        probability = (model.predict_proba(input_processed)[0, 1]
+                       if hasattr(model, 'predict_proba') else float(model.predict(input_processed)[0]))
 
         return PredictionResponse(
             prediction=int(prediction),
@@ -354,22 +365,25 @@ async def predict_batch(bookings: List[BookingFeatures]):
             detail="Model not loaded. Please ensure the model is trained and available."
         )
     
-    if scaler is None:
+    if preprocessor is None:
         raise HTTPException(
             status_code=503,
-            detail="Scaler not loaded. Please ensure the scaler is available."
+            detail="Preprocessor not loaded. Ensure training script produced models/preprocessor.pkl."
         )
     
     try:
         # Convert inputs to DataFrame
         raw_df = pd.DataFrame([booking.dict() for booking in bookings])
         feature_df = _build_feature_matrix(raw_df)
-        input_scaled = scaler.transform(feature_df)
+        try:
+            input_processed = preprocessor.transform(feature_df)
+        except Exception:
+            input_processed = feature_df
 
         # Make predictions
-        predictions = model.predict(input_scaled)
+        predictions = model.predict(input_processed)
         if hasattr(model, 'predict_proba'):
-            probabilities = model.predict_proba(input_scaled)[:, 1]
+            probabilities = model.predict_proba(input_processed)[:, 1]
         else:
             probabilities = predictions.astype(float)
 

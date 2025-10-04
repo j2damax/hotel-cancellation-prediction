@@ -1,0 +1,11 @@
+{
+  "timestamp": "2025-10-04T15:26:38.788047+00:00",
+  "categorical_strategy": "drop",
+  "dropped_columns": [
+    "country",
+    "guest_type",
+    "arrival_season",
+    "arrival_quarter"
+  ],
+  "remaining_feature_count": 37
+}

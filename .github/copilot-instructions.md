@@ -21,7 +21,7 @@ This is a production-ready ML service for predicting hotel booking cancellations
 
 - `scripts/train.py`: Trains 4 models (LogReg, RandomForest, XGBoost, PyTorch MLP) with synthetic data generation
 - `main.py`: FastAPI app that loads XGBoost as default production model with Pydantic validation
-- `models/`: Stores trained models (XGBoost pkl) and preprocessing artifacts (scaler.pkl)
+- `models/`: Stores trained models (XGBoost pkl) and preprocessing artifact (`preprocessor.pkl` consolidating scaling & categorical handling)
 - `mlruns/`: MLflow experiment tracking database (local filesystem)
 
 ### Key Architecture Decisions
@@ -96,7 +96,7 @@ All booking features use Pydantic with explicit validation ranges (see `BookingF
 ### Environment Variable Strategy
 
 - Configuration loaded from `.env` via python-dotenv with sensible defaults
-- Key variables: `MODEL_PATH`, `SCALER_PATH`, `MLFLOW_TRACKING_URI`, `API_PORT`
+- Key variables: `MODEL_PATH`, `PREPROCESSOR_PATH`, `MLFLOW_TRACKING_URI`, `API_PORT`
 - Docker compose uses env vars for port mapping and MLflow configuration
 - Production secrets (API keys, database URLs) stored in `.env` (gitignored)
 
@@ -143,7 +143,7 @@ When modifying models, verify the complete pipeline:
 
 ### Common Issues
 
-- **Model not found**: Ensure `models/xgboost_model.pkl` and `models/scaler.pkl` exist after training
+- **Model not found**: Ensure `models/xgboost_model.pkl` and `models/preprocessor.pkl` exist after training
 - **Prediction errors**: Check feature schema matches training data preprocessing
 - **MLflow issues**: Verify `mlruns/` directory structure matches experiment logging
 
@@ -151,7 +151,7 @@ When modifying models, verify the complete pipeline:
 
 1. Load the data set and plot the distribution of the target variable to understand class imbalance.
 2. EDA (Exploratory Data Analysis)
-    - plot number of missing values in each column. 
+   - plot number of missing values in each column.
    - Check reservation_status and reservation_status_date has been updated after the booking is canceled.
    - Column company and agent have a high percentage of missing values. So, we can drop these two columns.
    - Drop columns by pipe line: agent, company, country, reservation_status, reservation_status_date, booking_changes
@@ -159,28 +159,25 @@ When modifying models, verify the complete pipeline:
    - Spital analysis find where the customers are coming from.
    - corelation analysis to find the relationship between the features and the target variable, select the most important features.
    - perform mean encoding for categorical variables.
-   handling outlier data
+     handling outlier data
    - SMOTE method to handle the class imbalance problem.
-2. Preprocess the data (e.g., handle missing values, encode categorical variables).
-3. Split the data into training and testing sets.
-4. Train the model using the training set.
-5. Evaluate the model on the testing set and log metrics to MLflow.
-6. Random Forrest and Logistic Regression are used for the model training.
-7. Split the data into to train and test sets.
-8. Build categorical and continuous pipelines.
-9. Fit model
-10. Initialize search space for hyperparameter tuning.
-11. Use RandomizedSearchCV for hyperparameter tuning.
-12. Find best hyperparameters and fit the model.
-13. Regularization parameter C for Logistic Regression.
-14. Number of trees in the forest for Random Forest.
-15. Maximum depth of the tree for Random Forest.
-16. Evaluate the model using accuracy, precision, recall, and F1-score.
-17. cross validation is used for model evaluation.
-18 Find which variable is most important for the prediction using SHAP (SHapley Additive exPlanations)
-
-
-
+3. Preprocess the data (e.g., handle missing values, encode categorical variables).
+4. Split the data into training and testing sets.
+5. Train the model using the training set.
+6. Evaluate the model on the testing set and log metrics to MLflow.
+7. Random Forrest and Logistic Regression are used for the model training.
+8. Split the data into to train and test sets.
+9. Build categorical and continuous pipelines.
+10. Fit model
+11. Initialize search space for hyperparameter tuning.
+12. Use RandomizedSearchCV for hyperparameter tuning.
+13. Find best hyperparameters and fit the model.
+14. Regularization parameter C for Logistic Regression.
+15. Number of trees in the forest for Random Forest.
+16. Maximum depth of the tree for Random Forest.
+17. Evaluate the model using accuracy, precision, recall, and F1-score.
+18. cross validation is used for model evaluation.
+    18 Find which variable is most important for the prediction using SHAP (SHapley Additive exPlanations)
 
 Logisytic Regression, naive bayes, random forest, Descision tree, KNN
 Random Forrest confusion matrix

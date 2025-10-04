@@ -35,7 +35,7 @@ python scripts/train.py
 # - Generate sample hotel booking data
 # - Train 4 different models
 # - Save models with MLflow tracking
-# - Create models/scaler.pkl for feature scaling
+# - Create models/preprocessor.pkl for scaling & categorical encoding
 ```
 
 Expected output:
@@ -49,7 +49,7 @@ Hotel Cancellation Prediction - Model Training
    Cancellation rate: 31.16%
 
 2. Scaling features...
-   Scaler saved to models/scaler.pkl
+   Preprocessor saved to models/preprocessor.pkl
 
 3. Training models...
 --------------------------------------------------------------------------------
