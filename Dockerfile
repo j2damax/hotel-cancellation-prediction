@@ -21,6 +21,7 @@ RUN pip install --upgrade pip \
 
 # Copy application (no baked model artifacts or mlruns to keep image slim)
 COPY main.py ./
+COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY src/ ./src/
 # (Optional) artifacts directory placeholder (left empty at build)

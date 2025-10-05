@@ -5,34 +5,63 @@ from typing import Optional
 
 
 class BookingFeatures(BaseModel):
+    """Public prediction payload schema.
+
+    Many training-time features are internal or engineered; to keep the public
+    contract lightweight we make several fields optional with neutral defaults.
+    This enables a *minimal* JSON payload such as:
+        {"lead_time": 30, "arrival_month": 7, "adults": 2, "children": 0, "adr": 120.0}
+    The `_prepare` function supplements / engineers the remaining columns.
+    """
+
     lead_time: int = Field(..., ge=0)
     arrival_month: int = Field(..., ge=1, le=12)
-    stays_weekend_nights: int = Field(..., ge=0)
-    stays_week_nights: int = Field(..., ge=0)
+    # Stay details (optional, defaulting to a short weekday stay)
+    stays_weekend_nights: int | None = Field(0, ge=0)
+    stays_week_nights: int | None = Field(1, ge=0)
+    # Guest composition
     adults: int = Field(..., ge=1)
-    children: int = Field(..., ge=0)
-    is_repeated_guest: int = Field(..., ge=0, le=1)
-    previous_cancellations: int = Field(..., ge=0)
-    booking_changes: int = Field(..., ge=0)
-    adr: float = Field(..., ge=0)
-    required_car_parking_spaces: int = Field(..., ge=0)
-    total_of_special_requests: int = Field(..., ge=0)
+    children: int | None = Field(0, ge=0)
+    # Historical / behavioral signals
+    is_repeated_guest: int | None = Field(0, ge=0, le=1)
+    previous_cancellations: int | None = Field(0, ge=0)
+    booking_changes: int | None = Field(0, ge=0)
+    # Pricing
+    adr: float = Field(..., ge=0, description="Average daily rate (numeric, required)")
+    # Amenities / request counts
+    required_car_parking_spaces: int | None = Field(0, ge=0)
+    total_of_special_requests: int | None = Field(0, ge=0)
 
     model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "lead_time": 120,
-            "arrival_month": 7,
-            "stays_weekend_nights": 2,
-            "stays_week_nights": 3,
-            "adults": 2,
-            "children": 1,
-            "is_repeated_guest": 0,
-            "previous_cancellations": 0,
-            "booking_changes": 1,
-            "adr": 95.5,
-            "required_car_parking_spaces": 0,
-            "total_of_special_requests": 2
-        }
+        "examples": [
+            {
+                "summary": "Minimal",
+                "value": {
+                    "lead_time": 30,
+                    "arrival_month": 7,
+                    "adults": 2,
+                    "children": 0,
+                    "adr": 120.0
+                }
+            },
+            {
+                "summary": "Extended",
+                "value": {
+                    "lead_time": 120,
+                    "arrival_month": 7,
+                    "stays_weekend_nights": 2,
+                    "stays_week_nights": 3,
+                    "adults": 2,
+                    "children": 1,
+                    "is_repeated_guest": 0,
+                    "previous_cancellations": 0,
+                    "booking_changes": 1,
+                    "adr": 95.5,
+                    "required_car_parking_spaces": 0,
+                    "total_of_special_requests": 2
+                }
+            }
+        ]
     })
 
 

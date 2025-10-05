@@ -636,5 +636,71 @@ Use this before producing final academic or deployment results:
 - Automated LaTeX export of metrics & importance tables
 - Optional calibration & fairness diagnostics modules
 
+## SageMaker Deployment (MVP Alternative to ECS)
+
+This project supports direct deployment as an AWS SageMaker endpoint using the emitted champion artifacts without running a custom inference server on ECS.
+
+### Artifacts Packaged
+Included in `model.tar.gz`:
+- `champion_model.pkl`
+- `preprocessor.pkl`
+- `champion_meta.json`
+- (Optional) `feature_importance.json`, `shap_values_sample.json`, `feature_name_map.json`
+- `code/inference.py` (custom handlers)
+- `code/requirements.txt` (pinned inference deps)
+
+### Packaging
+```
+bash sagemaker/pack_model.sh --models-dir models --artifacts-dir artifacts --output model.tar.gz
+aws s3 cp model.tar.gz s3://<artifact-bucket>/deploy/model.tar.gz
+```
+
+### Create Model & Serverless Endpoint
+```
+REGION=<region>
+IMAGE=763104351884.dkr.ecr.${REGION}.amazonaws.com/pytorch-inference:2.2.0-cpu-py310-ubuntu20.04-sagemaker
+aws sagemaker create-model \
+  --model-name hotel-cancel-champion \
+  --primary-container Image=${IMAGE},ModelDataUrl=s3://<artifact-bucket>/deploy/model.tar.gz \
+  --execution-role-arn arn:aws:iam::<account>:role/SageMakerExecutionRole
+
+aws sagemaker create-endpoint-config \
+  --endpoint-config-name hotel-cancel-serverless \
+  --production-variants '[{"VariantName":"AllTraffic","ModelName":"hotel-cancel-champion","ServerlessConfig":{"MemorySizeInMB":4096,"MaxConcurrency":5}}]'
+
+aws sagemaker create-endpoint \
+  --endpoint-name hotel-cancel \
+  --endpoint-config-name hotel-cancel-serverless
+```
+
+### Invoke
+```
+aws sagemaker-runtime invoke-endpoint \
+  --endpoint-name hotel-cancel \
+  --body '{"lead_time":120,"arrival_month":7,"stays_weekend_nights":2,"stays_week_nights":3,"adults":2,"children":1,"is_repeated_guest":0,"previous_cancellations":0,"booking_changes":1,"adr":95.5,"required_car_parking_spaces":0,"total_of_special_requests":2}' \
+  --content-type application/json response.json
+cat response.json
+```
+
+### Threshold Resolution Order
+1. ENV `DECISION_THRESHOLD` (if set)
+2. `champion_meta.json` (`decision_threshold`)
+3. Default 0.5
+
+### Update Flow
+1. Retrain & generate new artifacts
+2. Repackage → upload new `model.tar.gz`
+3. Create new model + (optional new endpoint config) → update endpoint
+
+### Clean Up
+```
+aws sagemaker delete-endpoint --endpoint-name hotel-cancel
+aws sagemaker delete-endpoint-config --endpoint-config-name hotel-cancel-serverless
+aws sagemaker delete-model --model-name hotel-cancel-champion
+```
+
+### Academic Rationale
+Using SageMaker abstracts infrastructure (autoscaling, secure HTTPS, artifact materialization) allowing focus on reproducibility, interpretability artifacts, and threshold tuning—aligning with coursework objectives.
+
 ---
 Updated: 2025-10-05

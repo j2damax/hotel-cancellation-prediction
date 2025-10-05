@@ -103,6 +103,38 @@ def load_model() -> None:
             preprocessor = PreprocessingPipeline.load(config.LOCAL_PREPROCESSOR_PATH)
         except Exception:
             preprocessor = None
+    # Hugging Face Hub fallback (after local / S3) if HF_MODEL_REPO is set
+    if (model is None or preprocessor is None) and getattr(config, 'HF_MODEL_REPO', None):
+        try:
+            from huggingface_hub import snapshot_download
+            repo_id = config.HF_MODEL_REPO
+            cache_dir = os.path.join('models','hf', repo_id.replace('/','__'))
+            local_dir = snapshot_download(repo_id=repo_id, local_dir=cache_dir, local_dir_use_symlinks=False)
+            model_path = os.path.join(local_dir, 'champion_model.pkl')
+            preproc_path = os.path.join(local_dir, 'preprocessor.pkl')
+            meta_path = os.path.join(local_dir, 'champion_meta.json')
+            if model is None and os.path.exists(model_path):
+                m_candidate = joblib.load(model_path)
+                if hasattr(m_candidate, 'predict'):
+                    model = m_candidate
+                    model_version = f"hf_{os.path.getmtime(model_path):.0f}"
+            if preprocessor is None and os.path.exists(preproc_path):
+                try:
+                    preprocessor = PreprocessingPipeline.load(preproc_path)
+                except Exception:
+                    preprocessor = None
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path) as mf:
+                        meta = json.load(mf)
+                    if 'decision_threshold' in meta:
+                        champion_meta_threshold = meta['decision_threshold']
+                except Exception:
+                    pass
+            if model is not None:
+                print(f"Loaded model (HF) repo={repo_id} version={model_version}")
+        except Exception as e:
+            print(f"HF load failed: {e}")
     if model is None:
         print("No model loaded (S3 + local fallback failed). API will report model_not_loaded.")
 

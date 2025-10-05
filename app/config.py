@@ -11,6 +11,7 @@ AWS_REGION = os.getenv("AWS_REGION")
 DECISION_THRESHOLD_ENV = os.getenv("DECISION_THRESHOLD")  # optional override
 ALLOW_START_WITHOUT_MODEL = os.getenv("ALLOW_START_WITHOUT_MODEL", "false").lower() == "true"
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "artifacts")
+HF_MODEL_REPO = os.getenv("HF_MODEL_REPO")  # e.g. j2damax/hotel-cancel-model
 
 # Local fallback paths (used if S3 not configured or fetch fails)
 LOCAL_MODEL_PATH = os.getenv("LOCAL_MODEL_PATH", "models/champion_model.pkl")
