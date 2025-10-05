@@ -100,6 +100,18 @@ This project implements a **hybrid approach** combining interactive analysis wit
 - Health checks included
 - Ready for Amazon ECR deployment
 
+### Web Demo Application
+
+- **Modern React + TypeScript UI** (`web/` directory)
+- Real-time predictions with visual risk classification
+- SHAP-based feature importance visualization
+- Prediction history tracking (last 25 predictions)
+- Mobile-friendly responsive design
+- Environment-configurable API endpoint
+- Production-ready static build (< 210KB bundle)
+
+See `web/README.md` for setup and deployment instructions.
+
 ## Installation
 
 ### Prerequisites

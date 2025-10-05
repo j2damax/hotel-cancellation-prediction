@@ -11,8 +11,6 @@ export interface BookingInput {
   adr: number;
   required_car_parking_spaces: number;
   total_of_special_requests: number;
-  deposit_type?: string;
-  market_segment?: string;
 }
 
 export interface PredictionResult {
