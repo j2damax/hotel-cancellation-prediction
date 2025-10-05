@@ -1,0 +1,62 @@
+[
+  {
+    "group": "lead_time_bucket",
+    "value": "LT_180+",
+    "cancellation_rate": 0.5684,
+    "support": 24962
+  },
+  {
+    "group": "lead_time_bucket",
+    "value": "LT_30_89",
+    "cancellation_rate": 0.3779,
+    "support": 29919
+  },
+  {
+    "group": "lead_time_bucket",
+    "value": "LT_90_179",
+    "cancellation_rate": 0.4455,
+    "support": 26462
+  },
+  {
+    "group": "lead_time_bucket",
+    "value": "LT_<30",
+    "cancellation_rate": 0.1825,
+    "support": 38047
+  },
+  {
+    "group": "special_requests_bucket",
+    "value": "SR_0",
+    "cancellation_rate": 0.4772,
+    "support": 70318
+  },
+  {
+    "group": "special_requests_bucket",
+    "value": "SR_1",
+    "cancellation_rate": 0.2202,
+    "support": 33226
+  },
+  {
+    "group": "special_requests_bucket",
+    "value": "SR_2_3",
+    "cancellation_rate": 0.2141,
+    "support": 15466
+  },
+  {
+    "group": "special_requests_bucket",
+    "value": "SR_4+",
+    "cancellation_rate": 0.1,
+    "support": 380
+  },
+  {
+    "group": "is_repeated_guest_str",
+    "value": "0",
+    "cancellation_rate": 0.3779,
+    "support": 115580
+  },
+  {
+    "group": "is_repeated_guest_str",
+    "value": "1",
+    "cancellation_rate": 0.1449,
+    "support": 3810
+  }
+]

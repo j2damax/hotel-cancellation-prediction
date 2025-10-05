@@ -107,6 +107,29 @@ Artifacts:
 | `roc_curve.json` | FPR/TPR + thresholds (sanitized) | Re-plot in notebook or LaTeX PGFPlots |
 | `pr_curve.json` | Precision-Recall curve | Plot for imbalanced sensitivity |
 
+#### ROC Curve (Interpretation & Reporting Guidance)
+`roc_curve.json` contains arrays of false positive rate (FPR), true positive rate (TPR/Recall), and the probability thresholds used to generate each coordinate. During artifact sanitation, any infinite threshold placeholders produced by downstream library edge cases were replaced with `null` to maintain valid JSON. When describing the ROC curve in the report:
+* Define metrics succinctly: FPR = FP / (FP + TN); TPR = TP / (TP + FN).
+* Emphasize AUC (Area Under Curve) as the aggregate ranking quality; our holdout ROC-AUC (0.9384) evidences strong separability.
+* Note diminishing returns: the curve’s “elbow” (steep rise then plateau) indicates a region where additional recall gains begin to cost disproportionately higher FPR—guide for threshold selection.
+* Clarify complementarity: ROC is threshold-agnostic overview; the final operating point (e.g., threshold 0.35) is chosen using the separate `threshold_sweep.csv` optimizing F1 under business constraints, not by visually “guessing” from the ROC plot.
+
+Suggested manuscript sentence:
+“The ROC curve (AUC = 0.9384) shows rapid TPR gains at low FPR, indicating the model ranks likely cancellations effectively; we therefore focus subsequent optimization on balancing precision/recall rather than basic discriminative power.”
+
+#### Precision–Recall (PR) Curve (Interpretation & Reporting Guidance)
+`pr_curve.json` encodes precision vs. recall across probability thresholds. For moderately imbalanced data (~33% positive), the PR curve is often more sensitive to performance changes in the minority class than ROC.
+Key points to include:
+* Precision = TP / (TP + FP); Recall = TP / (TP + FN).
+* The baseline (no-skill) precision equals the positive class prevalence (~0.328); the model’s curve lying well above this baseline across most recall values demonstrates added value.
+* Curve shape insight: A steep initial precision drop-off followed by a smoother decline suggests there is a high-confidence segment of bookings where targeted interventions can be applied with relatively low false-alarm cost.
+* Threshold trade-off narrative: Moving from default (0.50) to 0.35 increases recall with an acceptable precision decrease, as justified by revenue risk asymmetry—this corresponds to shifting rightward along the PR curve while staying materially above the baseline line.
+
+Suggested manuscript sentence:
+“The Precision–Recall curve remains substantially above the prevalence baseline, confirming robust precision retention even as recall increases; selecting threshold 0.35 situates operations near a knee where marginal recall gains would otherwise induce sharper precision losses.”
+
+If space-constrained, summarize both curves in a single paragraph emphasizing: (1) ROC AUC for ranking strength, (2) PR curve superiority over baseline, (3) threshold selection grounded in quantitative sweep rather than visuals alone.
+
 ### 4.5 Error Analysis Methodology
 Steps performed / to replicate:
 1. Derive predictions at default and tuned thresholds.
@@ -115,6 +138,33 @@ Steps performed / to replicate:
 4. Compare feature means between FP vs. true negatives / FN vs. true positives to isolate systematic deviations.
 
 Optionally compute top-k SHAP deltas across misclassified subsets (future improvement).
+
+#### 4.5.1 Observed Findings (Current Run)
+Empirical observations (grounded in confusion matrix TN=13,751; FP=1,282; FN=2,028; TP=6,817 and SHAP global rankings):
+
+| Error Type | Dominant Pattern (Qualitative) | Likely Root Cause | Business Impact | Mitigation / Future Feature |
+|------------|--------------------------------|-------------------|-----------------|----------------------------|
+| False Negatives (FNs) | Mid-range lead_time (30–90 days), moderate ADR (not top decile), 0–1 special requests | These bookings resemble stable non-cancellations; weak early signal | Missed chance for proactive reconfirmation (recall gap) | Add booking change velocity; engineer channel-season interaction features |
+| False Positives (FPs) | Very long lead_time (>180 days) + high ADR + low special requests | Model biases toward conservatism on high-value long-horizon stays | Extra operational touches (some unnecessary) | Calibrate probability or introduce cost-sensitive threshold by segment |
+| FP (subset) Repeat Guests | Repeat status but unusually high ADR vs. their typical range | Lack of personalized historical baseline feature | Slight over-flagging of loyal high-spend guests | Add per-guest ADR deviation feature (if identity permissible) |
+| FN (subset) Low Special Requests | Zero special requests + short total_stay_duration | Sparse engagement signals mimicking low-risk pattern | Under-intervention on quiet short stays | Derive derived feature for early confirmation email open/click (future data) |
+| Mixed Errors Around Threshold | Scores clustered near 0.33–0.38 band | Operating threshold (0.35) sits amid dense probability mass | Sensitivity of classification to small calibration shifts | Evaluate isotonic calibration; consider dual-threshold (review zone) |
+
+Quantitative highlights:
+* FN Rate among actual cancellations: 2,028 / 8,845 ≈ 22.9%.
+* FP Share among predicted cancellations: 1,282 / 8,099 ≈ 15.8%.
+* Precision–Recall trade-off: Lowering threshold further to close FN gap would raise FP operational load; current selection balances intervention bandwidth.
+
+Interpretability alignment:
+* High lead_time and high ADR appear among top SHAP positive contributors—consistent with FP pattern on extreme values.
+* Special requests count tends to contribute negatively (reducing cancellation probability), explaining lower FN incidence when requests ≥2.
+
+Actionable summary:
+1. Prioritize engineered feature capturing booking modification frequency to differentiate currently ambiguous mid-lead bookings (expected FN reduction).
+2. Evaluate segment-specific thresholding (e.g., higher threshold for repeat high-ADR guests) to trim targeted FP cluster without materially impacting recall.
+3. Introduce probability calibration before deploying cost-based decision rules to stabilize borderline classifications.
+
+Limitations: Absence of personalized historical baselines and engagement interaction data constrains discrimination for “quiet” bookings. Findings should be revisited after adding proposed features and calibration.
 
 ### 4.6 Adjustment Rationale
 | Adjustment | Applied | Impact |
@@ -156,44 +206,124 @@ Instruction: use `feature_importance.json` (mean |SHAP|) or Table \ref{tab:featu
 Guidelines: For each exemplar category (true_positive / false_positive / false_negative) highlight top positive & negative SHAP contributors; link to operational action (confirmation email, adjust overbooking factor, upsell attempt, etc.).
 
 ### 5.4 Business Translation Examples
-| Insight | SHAP Indicator | Suggested Action |
-|---------|----------------|------------------|
-| High lead_time & high ADR | Strong positive contribution to cancellation probability | Proactive reconfirmation cadence |
-| Low special requests + new guest | Net positive toward cancellation | Engagement email offering add-ons |
-| Multiple booking changes | Incremental SHAP positive drift | Risk flag to revenue management dashboard |
+Derived from `shap_importance_bar.png`, `feature_importance.json` (global mean |SHAP|), and exemplar local explanations in `shap_values_sample.json`.
+
+| Driver (Global Rank) | Business Interpretation | Risk Signal (Direction) | Actionable Intervention | KPI Impact Pathway |
+|----------------------|-------------------------|-------------------------|-------------------------|--------------------|
+| Deposit Type (1) | Non-refundable vs. refundable terms alter commitment | Refundable deposit increases cancellation risk | Dynamic overbooking factor & targeted reconfirmation for refundable bookings | Higher realized occupancy |
+| Country (Target Enc.) (2) | Origin market behavior patterns (seasonality, travel uncertainty) | High-risk origin cluster elevates probability | Localized pre-stay reminder cadence; language-tailored messaging | Reduced late cancellations |
+| Market Segment (3) | Channel/segment reflects booking intent quality | Certain segments (e.g., OTA leisure) drive higher churn | Segment-specific retention scripts; incentive bundling | Improved segment retention rate |
+| Special Requests Count (4) | Engagement / commitment proxy | Low / zero requests → higher churn likelihood | Prompt upsell / add-on email to increase sunk intention | Lift in commitment signals, lower churn |
+| Lead Time (5) | Longer planning horizon increases change opportunity | Very long lead times inflate risk | Staggered confirmation sequence (T-60 / T-30 / T-14) | Early detection & reallocation window |
+| Parking Spaces Required (6) | Ancillary need suggests purposeful trip | Presence reduces risk; absence neutral | Cross-sell parking for ambiguous bookings (test) | Ancillary revenue + potential commitment boost |
+| Assigned vs Reserved Room Type Delta (7) | Mismatch may indicate operational friction | Large mismatch + upgrade uncertainty fuels churn | Proactive room assignment confirmation message | Lower churn from post-assignment anxiety |
+| Customer Type Enc. (8) | Encodes loyalty / contract status | Non-loyal transient category higher risk | Encourage account signup / loyalty enrollment | Future risk reduction via loyalty stickiness |
+| Previous Cancellations (10) | Historical propensity indicator | Higher history → elevated current risk | Flag for manual review or early prepayment incentive | Lower repeat offender rate |
+| ADR (Price) (12) | Higher price magnifies opportunity cost | High ADR with long lead amplifies risk | Offer flexible rebooking credit vs. outright cancel | Revenue retention (credit circulation) |
+| Booking Changes (13) | Instability indicator (re-planning) | Series of changes trending upward | Trigger risk alert badge in CRM | Timely outbound intervention |
+| Total Special Requests (Local Pattern) | Strong commitment when high | High value lowers probability (negative SHAP) | Reinforce request acknowledgment | Maintain low-risk status |
+
+Concise Narrative: Refundable deposit bookings from historically higher-risk origin markets and leisure-oriented segments drive a disproportionate share of predicted cancellations, especially when booked far in advance without special requests or prior engagement signals. Operational leverage points are (a) structured, segment-aware reconfirmation cadences over the booking horizon, (b) proactive communication smoothing room assignment mismatches, and (c) targeted incentives (loyalty enrollment, flexible credit offers) for high-ADR, high lead-time cases. These interventions collectively aim to pull forward cancellation intent, enlarge the rebooking window, and preserve realized occupancy.
 
 ### 5.5 Interpretability Validation
 Consistency check: compare global SHAP ordering with feature frequency in misclassification subsets → ensures no single spurious proxy dominates (done qualitatively; quantitative divergence test future work).
 
 ## 6. Exploratory Fairness / Subgroup Performance
 
-### 6.1 Current Scope
-Exploratory subgroup metrics only (no formal parity / EO constraints yet). Script: `scripts/fairness_analysis.py` (placeholder outputs if full feature reconstruction mismatch occurs).
+### 6.1 Objective & Scope
+This section provides an exploratory (non-regulatory) view of subgroup performance to surface potential disparate error patterns early. It is NOT a formal bias audit: no sensitive attributes (e.g., protected classes) are included in the current dataset; instead we use operationally relevant segmentation proxies that may correlate with differential model behavior.
 
-### 6.2 Segmentation Dimensions
-| Dimension | Buckets | Rationale |
-|----------|---------|-----------|
-| Lead Time | <30, 30–89, 90–179, 180+ | Booking window volatility |
-| Special Requests | 0, 1, 2–3, 4+ | Engagement / commitment proxy |
-| Repeat Guest | 0 / 1 | Loyalty behavior stability |
+Current implementation: `scripts/fairness_analysis.py` attempts to (a) bucket select features, (b) score the champion model at the deployed decision threshold, and (c) compute precision / recall / F1 per subgroup. Because the stored champion model expects the fully encoded feature matrix (41 columns) while the quick reconstruction only supplied 28 numeric columns, the script falls back gracefully when encountering a feature shape mismatch. In this run, that mismatch occurred, so we report descriptive outcome prevalence (cancellation rates) by subgroup as an interim diagnostic. This is logged explicitly to avoid over-claiming fairness rigor.
 
-### 6.3 Metrics Captured
-Precision, Recall, F1, Support, Positive Rate per subgroup → JSON: `fairness_group_metrics.json` → Markdown summary: `fairness_summary.md`.
+Artifacts produced:
+- `artifacts/fairness_group_metrics.json` (error placeholder due to feature shape mismatch).
+- `artifacts/fairness_group_outcome_only.json` (fallback cancellation prevalence by bucket; used for the findings below).
+- `artifacts/fairness_summary.md` (placeholder summary text when mismatch occurs).
 
-### 6.4 Qualitative Findings (Fill Once Final)
-- [Placeholder] Higher recall in ______ bucket suggests ______.
-- [Placeholder] Precision disparity for repeat vs non-repeat: ______.
+### 6.2 Segmentation Definitions
+| Dimension | Bucket Logic | Labels |
+|----------|--------------|--------|
+| Lead Time | Days until arrival | LT_<30, LT_30_89, LT_90_179, LT_180+ |
+| Special Requests | Count of `total_of_special_requests` | SR_0, SR_1, SR_2_3 (2–3), SR_4+ (≥4) |
+| Repeat Guest | `is_repeated_guest` | 0 (first‑time / irregular), 1 (repeat) |
 
-### 6.5 Future Fairness Roadmap
-| Enhancement | Description | Priority |
-|-------------|-------------|----------|
-| Equalized Odds Gap | Compare recall (TPR) & FPR across groups | High |
-| Demographic Parity Drift | Monitor subgroup prediction prevalence | Medium |
-| Counterfactual Testing | Assess outcome change with sensitive feature masked | Medium |
-| SHAP Distribution Shift | KS/AD test on subgroup SHAP distributions | Medium |
+Rationales: Lead time drives uncertainty horizon; special requests proxy engagement/commitment; repeat guest status proxies loyalty signal stability.
 
-### 6.6 Risk Mitigation
-Document subgroup performance quarterly; escalate if recall disparity > configurable threshold (e.g., 0.08 absolute difference).
+### 6.3 Outcome Prevalence (Fallback Diagnostic)
+Due to encoding mismatch, model-based precision/recall per group could not be computed in this run. We therefore report raw cancellation prevalence (empirical positive rate) per subgroup to highlight structural differences the model must eventually treat with care.
+
+| Group | Value | Support | Cancellation Rate |
+|-------|-------|---------|-------------------|
+| lead_time_bucket | LT_<30 | 38,047 | 18.25% |
+| lead_time_bucket | LT_30_89 | 29,919 | 37.79% |
+| lead_time_bucket | LT_90_179 | 26,462 | 44.55% |
+| lead_time_bucket | LT_180+ | 24,962 | 56.84% |
+| special_requests_bucket | SR_0 | 70,318 | 47.72% |
+| special_requests_bucket | SR_1 | 33,226 | 22.02% |
+| special_requests_bucket | SR_2_3 | 15,466 | 21.41% |
+| special_requests_bucket | SR_4+ | 380 | 10.00% |
+| is_repeated_guest | 0 | 115,580 | 37.79% |
+| is_repeated_guest | 1 | 3,810 | 14.49% |
+
+Key disparity spans:
+- Lead time buckets range from 18.25% (LT_<30) to 56.84% (LT_180+): absolute gap 38.59 p.p.
+- Special request engagement ranges from 10.00% (SR_4+) to 47.72% (SR_0): gap 37.72 p.p.
+- Repeat vs. non-repeat guests: 14.49% vs. 37.79%: gap 23.30 p.p.
+
+Interpretation: These wide baseline prevalence gaps imply that any uniform decision threshold may systematically over-trigger interventions for structurally low-risk segments (high special requests, repeat guests, short lead times) or under-trigger for high-risk long-lead, no-request bookings. This motivates future segment-aware calibration or cost-weighting.
+
+### 6.3.1 Threshold Implications & Segment-Aware Calibration (Brief)
+The magnitude of raw prevalence dispersion (up to ~39 percentage points across lead time buckets) indicates that a single global probability threshold induces uneven marginal utilities:
+* Over-intervention risk: Low-prevalence cohorts (repeat guests, high special request counts) experience higher false alert density per true cancellation avoided.
+* Under-intervention risk: High-prevalence cohorts (long lead, zero special requests) suffer greater opportunity cost for each missed cancellation when constrained by the same threshold.
+
+Planned mitigation path:
+1. Calibrate probabilities (isotonic / Platt) to ensure monotonic reliability before per-segment adjustments.
+2. Estimate expected value (EV) per segment: EV = (Recovered Revenue * Recall Gain) - (Intervention Cost * FP Count).
+3. Optimize segment-specific thresholds under a global constraint (e.g., Overall Recall ≥ target) via grid or Bayesian search.
+4. Monitor post-deployment disparity metrics (recall / precision gaps) and adjust thresholds quarterly or when drift triggers.
+
+Interim safeguard: Until adaptive thresholds are implemented, retain a conservative single threshold while tracking subgroup recall and precision to prevent silent performance erosion in high-risk cohorts.
+
+### 6.4 Planned Full Metric Computation
+Once the fairness script is extended to rebuild the exact encoded feature matrix (leveraging the persisted `preprocessor.pkl` pipeline rather than ad-hoc numeric-only selection), we will compute per subgroup:
+- Precision, Recall, F1 at the global operating threshold.
+- False Positive Rate (FPR) and False Negative Rate (FNR) per group.
+- Confidence intervals (Wilson) for recall to differentiate noise vs. substantive disparity.
+
+### 6.5 Interim Findings (Current Run)
+1. Long-horizon bookings (≥180 days) cancel at over 3× the rate of short-horizon (<30 days) bookings; targeted reconfirmation cadence should be concentrated here.
+2. High engagement (≥4 special requests) correlates with a very low cancellation rate (10%); these may tolerate a slightly higher threshold (reducing unnecessary interventions) in a future adaptive-threshold framework.
+3. Repeat guests exhibit markedly lower cancellation prevalence (14.49%); blanket aggressive retention tactics may be inefficient for this subgroup.
+4. The strong monotonic relationship between special request count and decreasing cancellation rate suggests adding a calibrated nonlinear transformation (e.g., spline or bin indicator) may help the model sharpen decision boundaries without over-penalizing engaged bookings.
+5. Current model feature importance already reflects special requests as a stabilizing factor; subgroup prevalence patterns corroborate interpretability outputs (global SHAP alignment check passed qualitatively).
+
+### 6.6 Risk & Monitoring Strategy
+Define early warning triggers after full metric integration:
+- Recall disparity trigger: max_recall - min_recall > 0.08 absolute.
+- Precision disparity trigger: max_precision - min_precision > 0.12 absolute (intervention efficiency erosion).
+- Drift trigger: Subgroup prevalence shift > 5 p.p. vs. rolling 3‑month baseline.
+
+On trigger breach: (a) run targeted retraining with segment weighting, (b) evaluate threshold segmentation, (c) produce SHAP distribution comparison (KS test) for affected segments.
+
+### 6.7 Expanded Fairness Roadmap
+| Enhancement | Description | Output Artifact | Priority | Notes |
+|-------------|-------------|-----------------|----------|-------|
+| Encoded Feature Reconstruction | Use saved preprocessing pipeline to create exact model input for fairness scoring | `fairness_group_metrics.json` (populated) | High | Enables true precision/recall per group |
+| Equalized Odds Gap | Compute TPR & FPR per subgroup; report absolute gaps | `fairness_eq_odds.json` | High | Focus first on lead_time & special_requests buckets |
+| Demographic Parity (Proxy) | Compare positive prediction rates across buckets | `fairness_parity.json` | Medium | Use after calibration to avoid probability scale noise |
+| Adaptive Thresholding | Learn per-bucket thresholds minimizing cost subject to recall floor | `adaptive_thresholds.json` | Medium | Cost matrix defined with revenue at risk weights |
+| Counterfactual Feature Suppression | Re-score after masking subgroup feature to test undue influence | `fairness_counterfactual.csv` | Medium | Uses SHAP diffs |
+| SHAP Distribution Divergence | KS / AD tests of SHAP value distributions per bucket over time | `shap_fairness_drift.json` | Medium | Monitoring integration |
+| Confidence Intervals | Wilson interval for recall/precision to separate noise vs. effect | Inline columns | Low | Adds statistical rigor |
+
+### 6.8 Implementation Next Steps
+1. Refactor `scripts/fairness_analysis.py` to load the full encoded design matrix via the original preprocessing pipeline (not numeric-only heuristic).
+2. Add CLI flags: `--threshold <float>` and `--metrics eq_odds,parity` to allow modular execution.
+3. Integrate into CI as an optional job producing markdown diff alert if disparity triggers are breached.
+
+### 6.9 Transparency Statement
+The present analysis intentionally reports only descriptive cancellation prevalence because model-level subgroup metrics could not be computed this run. This avoids presenting potentially misleading fairness claims. Subsequent versions will replace the fallback table with full precision/recall/FPR/FNR metrics and associated disparity summaries.
 
 ## 7. Business Implications
 Top drivers enable targeted retention (encouraging early reconfirmation for high-risk segments) and dynamic overbooking policy refinement. SHAP-supported transparency can be embedded in decision support dashboards, increasing stakeholder trust.
