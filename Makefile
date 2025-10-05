@@ -20,7 +20,7 @@ PUSH_TAGS ?= $(IMAGE_TAG) latest
 # If ROWS provided, add --limit-rows flag
 LIMIT_ROWS_ARG := $(if $(ROWS),--limit-rows $(ROWS),)
 
-.PHONY: help train fast-train api mlflow test clean-artifacts artifacts-status interpretability docker-build docker-push docker-release docker-run
+.PHONY: help train fast-train api mlflow test clean-artifacts artifacts-status interpretability docker-build docker-push docker-release docker-run deploy-hf-space
 
 help:
 	@echo "Available targets:"
@@ -36,6 +36,7 @@ help:
 	@echo "  make docker-push      - Push image with tags (REGISTRY=<registry>)"
 	@echo "  make docker-release   - Build + push (convenience)"
 	@echo "  make docker-run       - Run local container exposing API port"
+	@echo "  make deploy-hf-space  - Deploy to Hugging Face Spaces"
 
 train:
 	$(PYTHON) scripts/train.py --cv-folds $(CV) --categorical-strategy $(CATEGORICAL) $(LIMIT_ROWS_ARG)
@@ -89,3 +90,7 @@ clean-artifacts:
 		artifacts/shap_values_sample.json \
 		artifacts/feature_name_map.json || true
 	@echo "Artifacts cleaned."
+
+deploy-hf-space:
+	@echo "Deploying to Hugging Face Spaces (clears cache & force updates)..."
+	$(PYTHON) scripts/deploy_to_hf_space.py
