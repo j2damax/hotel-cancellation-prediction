@@ -399,6 +399,53 @@ aws ecr batch-delete-image \
 aws ecr delete-repository --repository-name ${REPO_NAME} --force
 ```
 
+## Web Demo (Vite)
+
+The project includes a React-based web demo application in the `web/` directory.
+
+### Build Artifacts
+
+Build the static assets:
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+Artifacts are generated in `web/dist/`.
+
+### Deployment to AWS S3 + CloudFront
+
+Deploy the static site to S3:
+
+```bash
+# Create S3 bucket (if needed)
+aws s3 mb s3://hotel-prediction-demo
+
+# Configure bucket for static hosting
+aws s3 website s3://hotel-prediction-demo --index-document index.html
+
+# Sync build artifacts
+aws s3 sync web/dist/ s3://hotel-prediction-demo/ --delete
+
+# (Optional) Create CloudFront distribution for HTTPS and CDN
+# Then invalidate cache after updates:
+aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths '/*'
+```
+
+### Environment Configuration
+
+Update `web/.env` before building:
+
+```bash
+VITE_API_BASE_URL=https://your-api-domain.com
+VITE_DECISION_THRESHOLD=0.35
+VITE_HIGH_RISK_THRESHOLD=0.55
+```
+
+See `web/README.md` for detailed instructions.
+
 ## Troubleshooting
 
 ### Common Issues
