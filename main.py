@@ -11,6 +11,8 @@ import numpy as np
 import mlflow
 import joblib
 import os
+import time
+import threading
 import json
 from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
@@ -23,6 +25,12 @@ MODEL_PATH = os.getenv("MODEL_PATH", "models/")
 PREPROCESSOR_PATH = os.getenv("PREPROCESSOR_PATH", "models/preprocessor.pkl")
 MODEL_TYPE = os.getenv("MODEL_TYPE", "xgboost")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+# Remote artifact configuration (future deployment mode)
+MODEL_S3_URI = os.getenv("MODEL_S3_URI")  # e.g. s3://hotel-cancel-models-prod-<id>/models
+MODEL_VERSION = os.getenv("MODEL_VERSION", "latest")
+DECISION_THRESHOLD = os.getenv("DECISION_THRESHOLD")  # optional classification threshold (may be updated after load)
+AWS_REGION = os.getenv("AWS_REGION")
+ALLOW_START_WITHOUT_MODEL = os.getenv("ALLOW_START_WITHOUT_MODEL", "false").lower() == "true"
 
 # Initialize FastAPI app
 @asynccontextmanager
@@ -32,6 +40,10 @@ async def lifespan(app: FastAPI):
     print("=" * 80)
     load_model_and_scaler()
     load_inference_artifacts()
+    if model is None and not ALLOW_START_WITHOUT_MODEL:
+        print("✗ No model loaded during startup and ALLOW_START_WITHOUT_MODEL is false -> failing fast.")
+        print("  To allow the API to start without a model (for debugging), set ALLOW_START_WITHOUT_MODEL=true.")
+        raise RuntimeError("Model not loaded at startup. Ensure volumes are mounted or S3 env vars are set.")
     print("Initialization complete.")
     print("=" * 80)
     yield
@@ -87,12 +99,16 @@ class PredictionResponse(BaseModel):
     prediction: int = Field(..., description="Predicted class (0: not canceled, 1: canceled)")
     probability: float = Field(..., description="Probability of cancellation")
     model_used: str = Field(..., description="Model used for prediction")
+    applied_threshold: float | None = Field(None, description="Threshold used to convert probability -> class")
+    threshold_source: Optional[str] = Field(None, description="Origin of threshold: env|champion_meta|default")
 
 
 class HealthResponse(BaseModel):
     """Response model for health check."""
     status: str
     model_loaded: bool
+    model_version: Optional[str] = None
+    decision_threshold: Optional[float] = None
 
 
 class LocalExplanation(BaseModel):
@@ -119,6 +135,36 @@ from src.preprocessing import PreprocessingPipeline
 model = None
 preprocessor: Optional[PreprocessingPipeline] = None
 model_name = "XGBoost"  # Default model to use
+model_version: Optional[str] = None  # populated when remote S3 fetch implemented
+champion_meta_threshold: Optional[float] = None  # champion decision threshold (if provided)
+
+# --- Runtime Metrics / Instrumentation ---
+APP_START_TIME = time.time()
+_metrics_lock = threading.Lock()
+_prediction_request_count = 0
+_prediction_total_latency_sec = 0.0
+_last_model_reload_time: Optional[float] = None
+_last_model_reload_version: Optional[str] = None
+
+def _record_prediction_latency(latency_sec: float):
+    global _prediction_request_count, _prediction_total_latency_sec
+    with _metrics_lock:
+        _prediction_request_count += 1
+        _prediction_total_latency_sec += latency_sec
+
+def _metrics_snapshot() -> dict:
+    with _metrics_lock:
+        avg_latency = (_prediction_total_latency_sec / _prediction_request_count) if _prediction_request_count else 0.0
+        return {
+            'uptime_seconds': round(time.time() - APP_START_TIME, 3),
+            'model_loaded': model is not None,
+            'model_version': model_version,
+            'decision_threshold': _resolve_threshold()[0] if model is not None else None,
+            'prediction_request_count': _prediction_request_count,
+            'avg_prediction_latency_ms': round(avg_latency * 1000, 3),
+            'last_model_reload_time': _last_model_reload_time,
+            'last_model_reload_version': _last_model_reload_version
+        }
 
 # Inference artifacts
 mte_mappings: Dict[str, Any] = {}
@@ -131,9 +177,16 @@ TARGET_COL = os.getenv("TARGET_COL", "is_canceled")
 
 
 def load_model_and_scaler():
-    """Load the trained model and preprocessing pipeline (preferred) or legacy scaler."""
-    global model, preprocessor
-    
+    """Load the trained model and preprocessing pipeline (preferred) or legacy scaler.
+
+    Future deployment flow (when MODEL_S3_URI is set):
+      1. Resolve concrete version (read latest.txt if MODEL_VERSION == 'latest').
+      2. Download champion_model.pkl, preprocessor.pkl, champion_meta.json.
+      3. Populate model_version and DECISION_THRESHOLD for health reporting.
+      4. Fallback to local MLflow load if remote fetch fails.
+    """
+    global model, preprocessor, model_version, DECISION_THRESHOLD, champion_meta_threshold, _last_model_reload_time, _last_model_reload_version
+
     try:
         # Load centralized preprocessor if present
         if os.path.exists(PREPROCESSOR_PATH):
@@ -146,18 +199,113 @@ def load_model_and_scaler():
         else:
             print(f"⚠ Preprocessor not found at {PREPROCESSOR_PATH}; attempting legacy scaler path")
             preprocessor = None
-        
-        # Try to load model from MLflow
+        # Remote S3 fetch (if configured)
+        if MODEL_S3_URI:
+            try:
+                import boto3
+                from botocore.exceptions import ClientError
+                # Parse bucket + base prefix
+                if not MODEL_S3_URI.startswith('s3://'):
+                    raise ValueError('MODEL_S3_URI must start with s3://')
+                remainder = MODEL_S3_URI[len('s3://'):]
+                bucket, *rest = remainder.split('/', 1)
+                base_prefix = rest[0].rstrip('/') if rest else ''
+
+                s3 = boto3.client('s3', region_name=AWS_REGION) if AWS_REGION else boto3.client('s3')
+
+                resolved_version = MODEL_VERSION
+                if MODEL_VERSION == 'latest':
+                    latest_key = f"{base_prefix}/latest.txt" if base_prefix else 'latest.txt'
+                    obj = s3.get_object(Bucket=bucket, Key=latest_key)
+                    resolved_version = obj['Body'].read().decode('utf-8').strip()
+                    print(f"Resolved latest -> {resolved_version}")
+
+                version_prefix = f"{base_prefix}/{resolved_version}" if base_prefix else resolved_version
+                local_cache_dir = os.path.join('models', 'remote', resolved_version)
+                os.makedirs(local_cache_dir, exist_ok=True)
+
+                def _download(key_name: str, local_name: str):
+                    target = os.path.join(local_cache_dir, local_name)
+                    if not os.path.exists(target):
+                        print(f"↓ S3 fetch s3://{bucket}/{version_prefix}/{key_name} -> {target}")
+                        s3.download_file(bucket, f"{version_prefix}/{key_name}", target)
+                    return target
+
+                model_path = _download('champion_model.pkl', 'champion_model.pkl')
+                preproc_path = _download('preprocessor.pkl', 'preprocessor.pkl')
+                meta_path = _download('champion_meta.json', 'champion_meta.json')
+
+                # Load model (assumed xgboost pickled or MLflow artifact)
+                try:
+                    model_candidate = joblib.load(model_path)
+                    # Basic interface check
+                    if hasattr(model_candidate, 'predict'):
+                        globals()['model'] = model_candidate
+                        print(f"✓ Loaded model from S3 cached path {model_path}")
+                except Exception as e:
+                    print(f"⚠ Failed loading S3 model pickle: {e}")
+
+                # Override preprocessor if remote one available
+                try:
+                    remote_pre = PreprocessingPipeline.load(preproc_path)
+                    preprocessor = remote_pre
+                    print(f"✓ Loaded remote preprocessor from {preproc_path}")
+                except Exception as e:
+                    print(f"⚠ Failed loading remote preprocessor: {e}")
+
+                # Champion meta for decision threshold
+                try:
+                    with open(meta_path) as f:
+                        champ_meta = json.load(f)
+                    # Store champion threshold if present
+                    if 'decision_threshold' in champ_meta:
+                        champion_meta_threshold = champ_meta['decision_threshold']
+                    # If no explicit env override was provided pre-start, adopt champion threshold
+                    if champion_meta_threshold is not None and not os.getenv('DECISION_THRESHOLD'):
+                        os.environ['DECISION_THRESHOLD'] = str(champion_meta_threshold)
+                    # Refresh module-level variable in all cases (env override may exist)
+                    DECISION_THRESHOLD = os.getenv('DECISION_THRESHOLD')
+                    model_version = resolved_version
+                except Exception as e:
+                    print(f"⚠ Could not read champion_meta.json: {e}")
+            except ClientError as e:
+                print(f"⚠ S3 fetch failed ({e.response['Error'].get('Code')}): falling back to local MLflow")
+            except Exception as e:
+                print(f"⚠ S3 fetch disabled due to error: {e}")
+
+        else:
+            print("ℹ MODEL_S3_URI not set; skipping remote fetch.")
+
+        # Try to load model from MLflow (development / fallback)
+        # Local champion pickle fallback (explicit)
+        if model is None:
+            local_champion = os.path.join('models','champion_model.pkl')
+            if os.path.exists(local_champion):
+                try:
+                    model_candidate = joblib.load(local_champion)
+                    if hasattr(model_candidate, 'predict'):
+                        model = model_candidate
+                        # Derive a pseudo version using file mtime for transparency
+                        try:
+                            mtime = int(os.path.getmtime(local_champion))
+                            pseudo_version = f"local_{mtime}"
+                        except Exception:
+                            pseudo_version = 'local_champion'
+                        globals()['model_version'] = pseudo_version
+                        print(f"✓ Loaded local champion model from {local_champion} (model_version={pseudo_version})")
+                except Exception as e:
+                    print(f"⚠ Failed to load local champion model: {e}")
+
         try:
             # Set MLflow tracking URI
             mlflow_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
             mlflow.set_tracking_uri(mlflow_uri)
-            
+
             # Try to load the latest XGBoost model
             # In production, you would specify a specific run_id or use model registry
             client = mlflow.tracking.MlflowClient()
             experiment = client.get_experiment_by_name("hotel_cancellation_prediction")
-            
+
             if experiment:
                 runs = client.search_runs(
                     experiment_ids=[experiment.experiment_id],
@@ -165,8 +313,8 @@ def load_model_and_scaler():
                     order_by=["start_time DESC"],
                     max_results=1
                 )
-                
-                if runs:
+
+                if runs and model is None:  # only if no earlier model loaded
                     run_id = runs[0].info.run_id
                     model_uri = f"runs:/{run_id}/model"
                     model = mlflow.xgboost.load_model(model_uri)
@@ -178,7 +326,38 @@ def load_model_and_scaler():
         except Exception as e:
             print(f"⚠ Could not load model from MLflow: {e}")
             model = None
-    
+
+        if model is None:
+            print("✗ No model successfully loaded (S3, local champion, MLflow all failed). API will report model_not_loaded.")
+            print("  Troubleshooting suggestions:")
+            print("   - If using S3: set MODEL_S3_URI (e.g. s3://<bucket>/models) and ensure AWS creds are available inside container")
+            print("   - To mount local artifacts: docker run -v $(pwd)/models:/app/models:ro -v $(pwd)/artifacts:/app/artifacts:ro ...")
+            print("   - To bake models for dev only: add 'COPY models/ ./models/' and 'COPY artifacts/ ./artifacts/' to Dockerfile (not for prod)")
+        else:
+            # Successful (re)load -> record reload timestamp & version
+            _last_model_reload_time = time.time()
+            _last_model_reload_version = model_version
+            # Git SHA logging (best-effort)
+            git_sha = os.getenv('GIT_SHA')
+            if not git_sha:
+                head_path = os.path.join('.git','HEAD')
+                try:
+                    if os.path.exists(head_path):
+                        with open(head_path) as hf:
+                            ref = hf.read().strip()
+                        if ref.startswith('ref:'):
+                            ref_file = ref.split(' ',1)[1]
+                            ref_path = os.path.join('.git', ref_file)
+                            if os.path.exists(ref_path):
+                                with open(ref_path) as rf:
+                                    git_sha = rf.read().strip()[:12]
+                        else:
+                            git_sha = ref[:12]
+                except Exception:
+                    git_sha = None
+            if git_sha:
+                print(f"ℹ Loaded model_version={model_version} (git_sha={git_sha})")
+
     except Exception as e:
         print(f"✗ Error loading model artifacts: {e}")
         model = None
@@ -302,6 +481,188 @@ def _build_feature_matrix(df: pd.DataFrame) -> pd.DataFrame:
         df = df[ordered_cols]
     return df
 
+# --- Feature Alignment Layer -------------------------------------------------
+API_TO_TRAINING_MAP = {
+    # API schema -> training names (if different)
+    'arrival_month': 'arrival_date_month',
+    'stays_weekend_nights': 'stays_in_weekend_nights',
+    'stays_week_nights': 'stays_in_week_nights'
+}
+
+TRAINING_REQUIRED_BASE = set([
+    'hotel','lead_time','arrival_date_year','arrival_date_month','arrival_date_week_number',
+    'arrival_date_day_of_month','stays_in_weekend_nights','stays_in_week_nights','adults','children','babies',
+    'meal','country','market_segment','distribution_channel','is_repeated_guest','previous_cancellations',
+    'previous_bookings_not_canceled','reserved_room_type','assigned_room_type','booking_changes','deposit_type',
+    'days_in_waiting_list','customer_type','adr','required_car_parking_spaces','total_of_special_requests'
+])
+
+ENGINEERED_COLUMNS = [
+    'total_stay_duration','total_guests','is_family','guest_type','arrival_season','is_peak_season',
+    'arrival_quarter','is_summer_peak','is_holiday_season'
+]
+
+TARGET_ENCODED_SUFFIX = '_target_encoded'
+
+def _align_api_to_training(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Map the minimalist API payload into the richer training-time feature space.
+
+    Steps:
+      1. Rename API columns to training equivalents (month, stays names).
+      2. Inject default placeholders for required categorical/numeric fields absent from API.
+      3. Derive engineered features replicating training logic.
+      4. Add target-encoded placeholder columns (they will be filled later by _apply_mean_target_encoding or left NaN).
+    """
+    df = raw_df.copy()
+    # 1. Rename
+    for api_col, train_col in API_TO_TRAINING_MAP.items():
+        if api_col in df.columns and train_col not in df.columns:
+            df[train_col] = df[api_col]
+    # 2. Defaults for missing required base columns
+    # Reasonable neutral defaults (0 or most common); could refine using distribution_baselines
+    neutral_int_zero = ['hotel','arrival_date_year','arrival_date_week_number','arrival_date_day_of_month',
+                        'babies','previous_bookings_not_canceled','days_in_waiting_list','reserved_room_type',
+                        'assigned_room_type','deposit_type','meal','market_segment','distribution_channel','customer_type']
+    for col in TRAINING_REQUIRED_BASE:
+        if col not in df.columns:
+            if col in neutral_int_zero:
+                df[col] = 0
+            elif col == 'country':
+                df[col] = 'UNK'
+            else:
+                df[col] = 0
+    # 3. Engineered features
+    if 'stays_in_weekend_nights' in df.columns and 'stays_in_week_nights' in df.columns and 'total_stay_duration' not in df.columns:
+        df['total_stay_duration'] = df['stays_in_weekend_nights'] + df['stays_in_week_nights']
+    if 'adults' in df.columns and 'children' in df.columns and 'babies' in df.columns and 'total_guests' not in df.columns:
+        df['total_guests'] = df['adults'] + df['children'].fillna(0) + df['babies']
+    if 'children' in df.columns:
+        babies_series = df['babies'] if 'babies' in df.columns else 0
+        df['is_family'] = ((df['children'].fillna(0) > 0) | (babies_series > 0)).astype(int)
+    else:
+        df['is_family'] = 0
+    # guest_type (similar logic to deterministic features)
+    if 'guest_type' not in df.columns:
+        def _guest(row):
+            if row.get('babies',0) > 0: return 'family_with_babies'
+            if row.get('children',0) > 0: return 'family_with_children'
+            a = row.get('adults',0)
+            if a == 1: return 'solo_traveler'
+            if a == 2: return 'couple'
+            return 'group'
+        df['guest_type'] = df.apply(_guest, axis=1)
+    # Seasonal features
+    if 'arrival_date_month' in df.columns:
+        m = df['arrival_date_month']
+        season_map = {12:'winter',1:'winter',2:'winter',3:'spring',4:'spring',5:'spring',6:'summer',7:'summer',8:'summer',9:'autumn',10:'autumn',11:'autumn'}
+        df['arrival_season'] = m.map(season_map)
+        df['is_peak_season'] = m.isin([5,6,7,8,9]).astype(int)
+        df['arrival_quarter'] = m.apply(lambda x: f"Q{((x-1)//3)+1}")
+        df['is_summer_peak'] = m.isin([7,8]).astype(int)
+        df['is_holiday_season'] = m.isin([12,1]).astype(int)
+    else:
+        for c in ['arrival_season','is_peak_season','arrival_quarter','is_summer_peak','is_holiday_season']:
+            if c not in df.columns:
+                df[c] = np.nan
+    # 4. Ensure target encoded columns present if contract expects them
+    if feature_contract.get('feature_order'):
+        for col in feature_contract['feature_order']:
+            if col.endswith(TARGET_ENCODED_SUFFIX) and col not in df.columns:
+                df[col] = np.nan
+    return df
+
+def _apply_scaler_if_available(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply stored scaler from preprocessing pipeline to overlapping numeric columns.
+
+    This bypasses categorical handling differences because we already constructed the
+    aligned feature frame using stored feature_contract ordering. Only numeric columns
+    that were originally scaled are transformed.
+    """
+    global preprocessor
+    if preprocessor is None or preprocessor.state is None or preprocessor._scaler is None:
+        return df
+    scaled_cols = [c for c in preprocessor.state.scaled_numeric if c in df.columns]
+    if not scaled_cols:
+        return df
+    df_out = df.copy()
+    # Ensure float dtype
+    for c in scaled_cols:
+        if not pd.api.types.is_float_dtype(df_out[c]):
+            try:
+                df_out[c] = df_out[c].astype('float64')
+            except Exception:
+                df_out[c] = pd.to_numeric(df_out[c], errors='coerce').astype('float64')
+    df_out.loc[:, scaled_cols] = preprocessor._scaler.transform(df_out[scaled_cols])
+    return df_out
+
+def _prepare_for_target_strategy(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Lightweight preparation when using target encoding strategy.
+
+    Applies basic renames and deterministic engineered features but does NOT attempt
+    manual target encoding (delegated to preprocessor.transform). Avoids injecting
+    placeholder *_target_encoded or __te columns to prevent clashes.
+    """
+    # Apply renames similar to alignment map (subset)
+    for api_col, train_col in API_TO_TRAINING_MAP.items():
+        if api_col in raw_df.columns and train_col not in raw_df.columns:
+            raw_df[train_col] = raw_df[api_col]
+    df = _apply_deterministic_features(raw_df)
+    # Inject placeholder categorical columns that the target encoder saw during fit
+    # We inspect the preprocessor.state.target_mappings keys to know required raw categorical bases.
+    global preprocessor
+    try:
+        if preprocessor and getattr(preprocessor, 'state', None) and preprocessor.state.target_mappings:
+            needed_cats = list(preprocessor.state.target_mappings.keys())
+            for cat in needed_cats:
+                if cat not in df.columns:
+                    # Provide neutral / unknown placeholder. For geo-like fields use 'UNK'; else 'unknown'.
+                    if cat in ('country',):
+                        df[cat] = 'UNK'
+                    else:
+                        df[cat] = 'unknown'
+        # Ensure engineered seasonality fields base column present (arrival_date_month) to derive consistent categories
+        if 'arrival_date_month' in df.columns:
+            # recompute seasonal groupings in case placeholders were added after deterministic step
+            m = df['arrival_date_month']
+            season_map = {12:'winter',1:'winter',2:'winter',3:'spring',4:'spring',5:'spring',6:'summer',7:'summer',8:'summer',9:'autumn',10:'autumn',11:'autumn'}
+            df['arrival_season'] = m.map(season_map)
+            df['arrival_quarter'] = m.apply(lambda x: f"Q{((x-1)//3)+1}")
+        # guest_type already created in deterministic features; if missing create again
+        if 'guest_type' not in df.columns and {'adults','children'}.issubset(df.columns):
+            def _guest(row):
+                if row.get('children',0) > 0: return 'family_with_children'
+                a = row.get('adults',0)
+                if a == 1: return 'solo_traveler'
+                if a == 2: return 'couple'
+                return 'group'
+            df['guest_type'] = df.apply(_guest, axis=1)
+    except Exception as e:
+        print(f"⚠ Target strategy placeholder injection failed: {e}")
+    return df
+
+
+def _resolve_threshold() -> tuple[float, str]:
+    """Determine active classification threshold and its source.
+
+    Order of precedence:
+      1. DECISION_THRESHOLD env var (user override)
+      2. champion_meta_threshold loaded from champion_meta.json
+      3. default 0.5
+    Returns: (threshold_value, source_label)
+    """
+    global DECISION_THRESHOLD, champion_meta_threshold
+    if DECISION_THRESHOLD is not None:
+        try:
+            return float(DECISION_THRESHOLD), 'env'
+        except ValueError:
+            pass
+    if champion_meta_threshold is not None:
+        try:
+            return float(champion_meta_threshold), 'champion_meta'
+        except ValueError:
+            pass
+    return 0.5, 'default'
+
 
 ## Removed deprecated on_event startup in favor of lifespan context
 
@@ -323,10 +684,52 @@ async def root():
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
+    thr, _src = _resolve_threshold()
     return HealthResponse(
         status="healthy" if model is not None else "model_not_loaded",
-        model_loaded=model is not None
+        model_loaded=model is not None,
+        model_version=model_version,
+        decision_threshold=thr if model is not None else None
     )
+
+
+@app.get("/metrics", response_model=dict)
+async def metrics():
+    """Lightweight JSON metrics for operational insight."""
+    return _metrics_snapshot()
+
+
+class ReloadRequest(BaseModel):
+    version: Optional[str] = Field(None, description="Specific model version to load (or 'latest')")
+    force: bool = Field(False, description="Force reload even if version unchanged")
+    threshold_override: Optional[float] = Field(None, description="Optional override for decision threshold after reload")
+
+
+@app.post("/model/reload", response_model=dict)
+async def reload_model(req: ReloadRequest):
+    """Reload model / preprocessor from S3 (if configured) or local artifacts.
+
+    Allows specifying a concrete version; falls back to environment MODEL_VERSION if not provided.
+    """
+    global MODEL_VERSION, DECISION_THRESHOLD
+    if req.version:
+        if req.version != MODEL_VERSION:
+            MODEL_VERSION = req.version
+            os.environ['MODEL_VERSION'] = req.version
+        elif not req.force:
+            return { 'reloaded': False, 'reason': 'version_unchanged', 'model_version': model_version }
+    prev_version = model_version
+    if req.threshold_override is not None:
+        DECISION_THRESHOLD = str(req.threshold_override)
+        os.environ['DECISION_THRESHOLD'] = str(req.threshold_override)
+    load_model_and_scaler()
+    return {
+        'reloaded': model is not None,
+        'previous_version': prev_version,
+        'new_version': model_version,
+        'active_threshold': _resolve_threshold()[0],
+        'threshold_source': _resolve_threshold()[1]
+    }
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -350,26 +753,61 @@ async def predict(booking: BookingFeatures):
         )
     
     try:
+        _t0 = time.perf_counter()
         # Convert input to DataFrame
         raw_df = pd.DataFrame([booking.dict()])
-        # Build initial engineered deterministic features (legacy) THEN pass through centralized preprocessor to align with training
-        feature_df = _build_feature_matrix(raw_df)
-        try:
-            input_processed = preprocessor.transform(feature_df)
-        except Exception:
-            # Fallback: if contract-based reconstruction already matches processed training features
-            input_processed = feature_df
+        if preprocessor and getattr(preprocessor, 'state', None) and preprocessor.state.categorical_strategy == 'target':
+            # Use preprocessor.transform end-to-end (includes target encoding + scaling)
+            prep_df = _prepare_for_target_strategy(raw_df.copy())
+            try:
+                input_processed = preprocessor.transform(prep_df)
+                # Verify expected feature order columns present
+                expected = set(preprocessor.state.feature_order)
+                missing_after = [c for c in preprocessor.state.feature_order if c not in input_processed.columns]
+                if missing_after:
+                    raise ValueError(f"Post-transform missing encoded columns: {missing_after}. Raw provided columns: {list(prep_df.columns)}")
+            except Exception as e:
+                print(f"⚠ Target strategy transform failed, fallback to alignment path: {e}")
+                aligned_df = _align_api_to_training(raw_df)
+                feature_df = _build_feature_matrix(aligned_df)
+                input_processed = _apply_scaler_if_available(feature_df)
+        else:
+            aligned_df = _align_api_to_training(raw_df)
+            feature_df = _build_feature_matrix(aligned_df)
+            input_processed = _apply_scaler_if_available(feature_df)
 
-        # Make prediction
-        prediction = model.predict(input_processed)[0]
+        # Defensive: coerce any remaining object / categorical dtypes
+        if hasattr(input_processed, 'dtypes'):
+            obj_cols = [c for c in input_processed.columns if input_processed[c].dtype == 'object']
+            if obj_cols:
+                coercion_map = {}
+                for c in obj_cols:
+                    # If column looks numeric, attempt float conversion first
+                    try:
+                        input_processed[c] = pd.to_numeric(input_processed[c])
+                        coercion_map[c] = 'numeric_cast'
+                    except Exception:
+                        codes, uniques = pd.factorize(input_processed[c].astype(str))
+                        input_processed[c] = codes.astype(np.int32)
+                        coercion_map[c] = 'factorized'
+                print(f"✓ Coerced object columns: {coercion_map}")
+
+        # Probability
         probability = (model.predict_proba(input_processed)[0, 1]
                        if hasattr(model, 'predict_proba') else float(model.predict(input_processed)[0]))
+        # Determine threshold & class
+        thr, src = _resolve_threshold()
+        prediction = int(probability >= thr)
 
-        return PredictionResponse(
+        resp = PredictionResponse(
             prediction=int(prediction),
             probability=float(probability),
-            model_used=model_name
+            model_used=model_name,
+            applied_threshold=thr,
+            threshold_source=src
         )
+        _record_prediction_latency(time.perf_counter() - _t0)
+        return resp
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -398,20 +836,46 @@ async def predict_batch(bookings: List[BookingFeatures]):
         )
     
     try:
+        _t0 = time.perf_counter()
         # Convert inputs to DataFrame
         raw_df = pd.DataFrame([booking.dict() for booking in bookings])
-        feature_df = _build_feature_matrix(raw_df)
-        try:
-            input_processed = preprocessor.transform(feature_df)
-        except Exception:
-            input_processed = feature_df
+        if preprocessor and getattr(preprocessor,'state',None) and preprocessor.state.categorical_strategy == 'target':
+            prep_df = _prepare_for_target_strategy(raw_df.copy())
+            try:
+                input_processed = preprocessor.transform(prep_df)
+                missing_after = [c for c in preprocessor.state.feature_order if c not in input_processed.columns]
+                if missing_after:
+                    raise ValueError(f"Post-transform missing encoded columns: {missing_after}. Raw provided columns: {list(prep_df.columns)}")
+            except Exception as e:
+                print(f"⚠ Target strategy batch transform failed, fallback alignment path: {e}")
+                aligned_df = _align_api_to_training(raw_df)
+                feature_df = _build_feature_matrix(aligned_df)
+                input_processed = _apply_scaler_if_available(feature_df)
+        else:
+            aligned_df = _align_api_to_training(raw_df)
+            feature_df = _build_feature_matrix(aligned_df)
+            input_processed = _apply_scaler_if_available(feature_df)
+        if hasattr(input_processed, 'dtypes'):
+            obj_cols = [c for c in input_processed.columns if input_processed[c].dtype == 'object']
+            if obj_cols:
+                coercion_map = {}
+                for c in obj_cols:
+                    try:
+                        input_processed[c] = pd.to_numeric(input_processed[c])
+                        coercion_map[c] = 'numeric_cast'
+                    except Exception:
+                        codes, uniques = pd.factorize(input_processed[c].astype(str))
+                        input_processed[c] = codes.astype(np.int32)
+                        coercion_map[c] = 'factorized'
+                print(f"✓ (batch) coerced object columns: {coercion_map}")
 
-        # Make predictions
-        predictions = model.predict(input_processed)
         if hasattr(model, 'predict_proba'):
             probabilities = model.predict_proba(input_processed)[:, 1]
         else:
-            probabilities = predictions.astype(float)
+            # Fallback: treat model.predict outputs as probabilities (rare for tree models)
+            probabilities = model.predict(input_processed).astype(float)
+        thr, src = _resolve_threshold()
+        predictions = (probabilities >= thr).astype(int)
 
         # Create response list
         results = []
@@ -420,10 +884,13 @@ async def predict_batch(bookings: List[BookingFeatures]):
                 PredictionResponse(
                     prediction=int(pred),
                     probability=float(prob),
-                    model_used=model_name
+                    model_used=model_name,
+                    applied_threshold=thr,
+                    threshold_source=src
                 )
             )
 
+        _record_prediction_latency(time.perf_counter() - _t0)
         return results
     except Exception as e:
         raise HTTPException(
@@ -529,3 +996,42 @@ async def get_interpretability(top_k: int = 15):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# ------------------------- Optional Debug Endpoint ---------------------------
+ENABLE_DEBUG = os.getenv('ENABLE_DEBUG_ENDPOINT', 'false').lower() == 'true'
+if ENABLE_DEBUG:
+    @app.get('/debug/model')
+    async def debug_model():
+        """Return internal diagnostic details about model loading (do not enable in production)."""
+        def _file_info(path):
+            if os.path.exists(path):
+                try:
+                    return { 'exists': True, 'size_bytes': os.path.getsize(path) }
+                except Exception:
+                    return { 'exists': True, 'size_bytes': None }
+            return { 'exists': False, 'size_bytes': None }
+        local_champion_path = os.path.join('models','champion_model.pkl')
+        remote_cache_root = os.path.join('models','remote')
+        remote_versions = []
+        if os.path.exists(remote_cache_root):
+            for root, dirs, files in os.walk(remote_cache_root):
+                for f in files:
+                    if f == 'champion_model.pkl':
+                        remote_versions.append(os.path.relpath(os.path.join(root,f), remote_cache_root))
+        return {
+            'model_loaded': model is not None,
+            'model_version': model_version,
+            'env': {
+                'MODEL_S3_URI': MODEL_S3_URI,
+                'MODEL_VERSION': MODEL_VERSION,
+                'AWS_REGION': AWS_REGION,
+                'DECISION_THRESHOLD': DECISION_THRESHOLD
+            },
+            'paths': {
+                'local_champion': _file_info(local_champion_path),
+                'preprocessor': _file_info(PREPROCESSOR_PATH),
+            },
+            'remote_cached_versions': remote_versions,
+            'feature_contract_loaded': bool(feature_contract),
+            'preprocessor_loaded': preprocessor is not None and getattr(preprocessor,'state', None) is not None
+        }

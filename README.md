@@ -530,6 +530,8 @@ cp .env.example .env
 - `MODEL_PATH`: Directory for saved models (default: models/)
 - `LOG_LEVEL`: Logging level (default: INFO)
 
+For Hugging Face deployment specifics see `DEPLOYMENT.md`. For a minimal AWS (S3 + ECR/ECS) reference see `DEPLOYMENT_AWS.md` which documents bucket/repo naming, IAM actions, and runtime model fetch environment variables.
+
 ### Production Configuration
 
 For production deployments, set secure values in `.env`:

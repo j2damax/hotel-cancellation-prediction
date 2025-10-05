@@ -8,6 +8,53 @@ This guide provides step-by-step instructions for deploying the Hotel Cancellati
 - AWS CLI installed and configured
 - Docker installed locally
 - Models trained and available in the `models/` and `mlruns/` directories
+- (New) S3 bucket created for model artifacts (versioned): e.g. `hotel-cancel-models-prod-<id>`
+- IAM user/role with least-privilege S3 + ECR + (future) ECS permissions
+
+## Model Artifact Storage (S3)
+
+The container will no longer bake model artifacts; instead it fetches the champion at startup.
+
+Bucket layout (versioned):
+```
+s3://hotel-cancel-models-prod-<id>/models/
+  latest.txt                # contains current model_version (e.g. run_20251005_123045)
+  run_20251005_123045/
+    champion_model.pkl
+    preprocessor.pkl
+    champion_meta.json
+```
+
+### Minimal S3 Policy (adjust bucket name)
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::hotel-cancel-models-prod-<id>"]},
+    {"Effect": "Allow", "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"], "Resource": ["arn:aws:s3:::hotel-cancel-models-prod-<id>/*"]}
+  ]
+}
+```
+
+### New Environment Variables
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| MODEL_S3_URI | Base S3 URI for model versions | s3://hotel-cancel-models-prod-<id>/models |
+| MODEL_VERSION | Explicit version or `latest` sentinel | latest |
+| DECISION_THRESHOLD | App classification threshold | 0.35 |
+| AWS_REGION | Region for S3/ECR | eu-west-1 |
+
+At startup the API will:
+1. Resolve `MODEL_VERSION` (read `latest.txt` if value is `latest`).
+2. Download artifacts if not cached locally or version mismatch.
+3. Load model & preprocessor; expose `model_version` on `/health`.
+
+Publishing script (`scripts/publish_model.py`) will:
+1. Read `artifacts/champion_meta.json` to get a model_version identifier.
+2. Upload artifacts to versioned prefix.
+3. Update `latest.txt` atomically.
+
+Rollback: set `latest.txt` to previous version and restart task/service.
 
 ## Step 1: Train Models Locally
 
@@ -304,6 +351,19 @@ curl -X POST "${SERVICE_URL}/predict" \
     "required_car_parking_spaces": 0,
     "total_of_special_requests": 2
   }'
+
+# Metrics (lightweight, JSON)
+curl ${SERVICE_URL}/metrics | jq
+
+# Reload model to a specific version (e.g. rollback) – requires that version folder exists in S3
+curl -X POST ${SERVICE_URL}/model/reload \
+  -H "Content-Type: application/json" \
+  -d '{"version":"2025-10-05T11_16_52_449001_00_00"}' | jq
+
+# Force reload latest (even if unchanged) with threshold override
+curl -X POST ${SERVICE_URL}/model/reload \
+  -H "Content-Type: application/json" \
+  -d '{"version":"latest","force":true,"threshold_override":0.40}' | jq
 ```
 
 ## Continuous Deployment
@@ -349,6 +409,50 @@ jobs:
 ## Monitoring and Logging
 
 ### CloudWatch Logs
+### Custom Metrics Exposure
+
+The `/metrics` endpoint (JSON) now returns:
+
+```json
+{
+  "uptime_seconds": 123.456,
+  "model_loaded": true,
+  "model_version": "2025-10-05T11_16_52_449001_00_00",
+  "decision_threshold": 0.35,
+  "prediction_request_count": 42,
+  "avg_prediction_latency_ms": 18.72,
+  "last_model_reload_time": 1730723456.123,
+  "last_model_reload_version": "2025-10-05T11_16_52_449001_00_00"
+}
+```
+
+For production-grade observability you can:
+- Scrape this endpoint via a sidecar or scheduled Lambda and push to CloudWatch custom metrics.
+- Replace with Prometheus exposition format (future enhancement) if moving to EKS.
+
+### Model Reload Operations
+
+Use `/model/reload` to:
+- Roll forward: publish new version to S3 (updates `latest.txt`), then POST `{ "version": "latest" }`.
+- Roll back: POST with an older explicit version folder name.
+- Tune threshold without redeploy: POST `{ "threshold_override": 0.40 }`.
+
+Response fields:
+| Field | Meaning |
+|-------|---------|
+| reloaded | Whether a reload occurred (false if version unchanged and force=false) |
+| previous_version | Version before reload |
+| new_version | Effective version after reload |
+| active_threshold | Threshold now in effect (may reflect override) |
+| threshold_source | env | champion_meta | default |
+
+Concurrency: reload is synchronous and briefly blocks only the calling request. Prediction endpoints continue using the prior model until the new one is fully loaded.
+
+### Recommended Alarms
+- Health endpoint returning model_not_loaded for >5 minutes.
+- Rapid increase in avg_prediction_latency_ms (>500ms sustained).
+- Decision threshold drift from expected baseline (optional business rule alarm).
+
 
 ```bash
 # View logs
