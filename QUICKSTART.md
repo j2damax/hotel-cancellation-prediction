@@ -25,51 +25,27 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Train Models
+### 2. Train (with Optional Cross-Validation)
+
+Basic training (fast):
 
 ```bash
-# Train all models (LogReg, RF, XGBoost, PyTorch MLP)
-python scripts/train.py
-
-# This will:
-# - Generate sample hotel booking data
-# - Train 4 different models
-# - Save models with MLflow tracking
-# - Create models/preprocessor.pkl for scaling & categorical encoding
+python scripts/train.py --limit-rows 1000
 ```
 
-Expected output:
+Full cross-validation + champion selection:
+
+```bash
+python scripts/train.py --cv-folds 5 --categorical-strategy target
 ```
-================================================================================
-Hotel Cancellation Prediction - Model Training
-================================================================================
 
-1. Loading data...
-   Data shape: (10000, 13)
-   Cancellation rate: 31.16%
-
-2. Scaling features...
-   Preprocessor saved to models/preprocessor.pkl
-
-3. Training models...
---------------------------------------------------------------------------------
-
-   Training Logistic Regression...
-LogisticRegression - Accuracy: 0.6770, F1: 0.1387
-
-   Training Random Forest...
-RandomForest - Accuracy: 0.6815, F1: 0.1651
-
-   Training XGBoost...
-XGBoost - Accuracy: 0.6740, F1: 0.1850
-
-   Training PyTorch MLP...
-PyTorch_MLP - Accuracy: 0.6790, F1: 0.1662
-
-================================================================================
-Training completed! Check MLflow UI with: mlflow ui
-================================================================================
-```
+What happens:
+- Trains LogisticRegression, RandomForest, XGBoost, PyTorch MLP
+- (If --cv-folds) Runs stratified K-fold CV & selects champion (F1 primary, ROC-AUC tie-break)
+- Persists `models/champion_model.pkl` and `artifacts/champion_meta.json`
+- Generates diagnostics (confusion matrix, ROC/PR curve data, threshold sweep)
+- Generates SHAP interpretability artifacts
+- Logs all runs to MLflow
 
 ### 3. Start the API
 
@@ -120,12 +96,12 @@ curl -X POST "http://localhost:8000/predict" \
   }'
 ```
 
-Expected response:
+Sample response (structure only):
 ```json
 {
-  "prediction": 0,
-  "probability": 0.3195936381816864,
-  "model_used": "XGBoost"
+   "prediction": 0,
+   "probability": 0.31,
+   "model_used": "<ChampionModel>"
 }
 ```
 
@@ -161,6 +137,16 @@ docker build -t hotel-cancellation-prediction .
 docker run -p 8000:8000 hotel-cancellation-prediction
 ```
 
+### 5. Interpretability Endpoint
+
+After training with champion persistence, access global + local SHAP metadata:
+
+```bash
+curl http://localhost:8000/model/interpretability | jq
+```
+
+Returns champion info, top features, local exemplar explanations, and feature name map.
+
 ## View MLflow Experiments
 
 ```bash
@@ -176,6 +162,28 @@ In the MLflow UI you can:
 - Track experiments
 - Download trained models
 
+## Artifacts Overview
+
+Key files produced in `artifacts/` after a full run:
+
+| File | Purpose |
+|------|---------|
+| cv_metrics.json | Cross-validation metrics summary |
+| champion_meta.json | Champion model + selection rationale |
+| threshold_sweep.csv | Threshold vs precision/recall/F1 |
+| confusion_matrix.png | Visualization of performance |
+| roc_curve.json / pr_curve.json | Curve coordinate data |
+| classification_report.json | Per-class metrics |
+| shap_summary.png | Global SHAP beeswarm plot |
+| shap_importance_bar.png | Ranked SHAP importance |
+| feature_importance.json | Structured SHAP stats |
+| shap_values_sample.json | Local explanation exemplars |
+| feature_name_map.json | Human-readable feature labels |
+
+Model + preprocessing:
+| models/preprocessor.pkl | Shared preprocessing pipeline |
+| models/champion_model.pkl | Persisted best model |
+
 ## What's Next?
 
 - **Customize Models**: Edit `scripts/train.py` to adjust model parameters
@@ -183,6 +191,22 @@ In the MLflow UI you can:
 - **Deploy to AWS**: Follow the [DEPLOYMENT.md](DEPLOYMENT.md) guide
 - **API Documentation**: Visit http://localhost:8000/docs for full API reference
 - **Model Monitoring**: Implement monitoring with MLflow in production
+
+## Tests & CI
+
+Run tests locally:
+
+```bash
+pytest -q
+```
+
+Optional live API tests (disabled by default in CI):
+
+```bash
+RUN_LIVE_API=1 pytest -q
+```
+
+GitHub Actions workflow runs the test suite (skips live tests) and can upload artifacts.
 
 ## Troubleshooting
 
@@ -291,5 +315,15 @@ bookings_df.to_csv("bookings_with_predictions.csv", index=False)
 5. **Enable GPU** for faster PyTorch training (if available)
 
 ---
+
+## Readiness Quick Checklist
+
+1. Data present in `data/raw/`
+2. Full training run completed (no `--limit-rows`)
+3. `models/champion_model.pkl` exists
+4. All core artifacts present (see table above)
+5. `/health` and `/model/interpretability` endpoints return 200
+6. Tests pass (`pytest -q`)
+7. MLflow UI metrics reviewed
 
 Happy predicting! 🏨📊

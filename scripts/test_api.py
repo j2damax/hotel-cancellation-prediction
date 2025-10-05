@@ -2,10 +2,15 @@
 Example client script for testing the Hotel Cancellation Prediction API.
 """
 
+import os
 import requests
 import json
+import pytest
+
+RUN_LIVE = os.getenv("RUN_LIVE_API", "0") == "1"
 
 
+@pytest.mark.skipif(not RUN_LIVE, reason="Live API tests skipped (set RUN_LIVE_API=1 to enable)")
 def test_health(base_url="http://localhost:8000"):
     """Test the health endpoint."""
     print("Testing /health endpoint...")
@@ -15,6 +20,7 @@ def test_health(base_url="http://localhost:8000"):
     return response.json()
 
 
+@pytest.mark.skipif(not RUN_LIVE, reason="Live API tests skipped (set RUN_LIVE_API=1 to enable)")
 def test_single_prediction(base_url="http://localhost:8000"):
     """Test a single prediction."""
     print("Testing /predict endpoint...")
@@ -45,6 +51,7 @@ def test_single_prediction(base_url="http://localhost:8000"):
     return response.json()
 
 
+@pytest.mark.skipif(not RUN_LIVE, reason="Live API tests skipped (set RUN_LIVE_API=1 to enable)")
 def test_batch_prediction(base_url="http://localhost:8000"):
     """Test batch predictions."""
     print("Testing /predict/batch endpoint...")

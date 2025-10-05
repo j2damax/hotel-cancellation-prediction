@@ -1,6 +1,8 @@
 # Feature Engineering Instructions
 ## Hotel Booking Cancellation Prediction - Academic Research Framework
 
+> Interpretability Integration: After training, global and local feature impact is analyzed via SHAP. See generated artifacts in `artifacts/` (`shap_summary.png`, `shap_importance_bar.png`, `feature_importance.json`, `shap_values_sample.json`, `feature_name_map.json`) and the live API endpoint `/model/interpretability` for programmatic access to champion feature importance and exemplar explanations.
+
 This document provides comprehensive instructions for feature engineering, focusing on creating domain-specific features that enhance cancellation prediction accuracy. The input is the preprocessed CSV file, and the output will be an enhanced dataset with engineered features.
 
 ## 🎯 Research Objectives & Academic Context

@@ -74,8 +74,10 @@ This project implements a **hybrid approach** combining interactive analysis wit
 
 - **Logistic Regression**: Baseline linear model with L1/L2 regularization
 - **Random Forest**: Ensemble tree-based model with optimized hyperparameters
-- **XGBoost**: Gradient boosting model (champion model with F1=0.893, ROC-AUC=0.958)
+- **XGBoost**: Gradient boosting model (historically strong performer in internal experiments)
 - **PyTorch MLP**: Deep learning neural network with dropout and batch normalization
+
+> Champion model is now selected dynamically per training run using cross-validation (F1 primary, ROC-AUC tie-break). Any previously hard-coded champion claims (e.g., a fixed XGBoost score) should be treated as historical examples only.
 
 ### MLflow Integration
 
@@ -89,6 +91,7 @@ This project implements a **hybrid approach** combining interactive analysis wit
 - `/predict` - Single prediction endpoint with Pydantic validation
 - `/predict/batch` - Batch prediction endpoint for bulk processing
 - `/health` - Health check endpoint with model availability verification
+- `/model/interpretability` - Serve SHAP global + local explanation metadata (top features, exemplar cases)
 - Interactive API documentation at `/docs` with schema validation
 
 ### Docker Containerization
@@ -146,10 +149,12 @@ python scripts/train.py
 
 This will:
 
-- Generate sample hotel booking data
+- Load the hotel booking dataset (place real data in `data/raw/` if replacing sample)
 - Train 4 different models (LogReg, RF, XGBoost, PyTorch MLP)
-- Log all experiments to MLflow
-- Save the unified preprocessing artifact to `models/preprocessor.pkl`
+- Perform optional stratified cross-validation (if `--cv-folds` provided)
+- Select and persist a champion model (`models/champion_model.pkl`) with metadata
+- Generate diagnostic + interpretability artifacts (see Artifacts section below)
+- Log all experiments and runs to MLflow
 
 View MLflow UI to compare models:
 
@@ -334,6 +339,124 @@ After training, you can compare model performance in the MLflow UI. Metrics trac
 - F1 Score
 - ROC AUC
 
+## Cross-Validation & Champion Selection
+
+The training pipeline performs optional stratified K-fold cross-validation to robustly compare candidate models and automatically select a champion.
+
+### Running Cross-Validation
+
+```bash
+python scripts/train.py --cv-folds 5
+```
+
+### Champion Selection Criteria
+
+1. Primary: Highest `f1_score_mean`
+2. Tie-break: Highest `roc_auc_mean`
+3. Reported with mean ± std across folds
+
+### Key Artifacts
+
+- `artifacts/cv_metrics.json` – Per-fold + aggregate metrics (F1, ROC-AUC, precision, recall)
+- `artifacts/champion_meta.json` – Champion model name, metrics, selection rationale
+- `models/champion_model.pkl` – Persisted champion model
+
+### Example Metric Table (Illustrative Only)
+
+| Model | F1 (mean ± std) | ROC-AUC (mean ± std) | Precision | Recall |
+|-------|-----------------|----------------------|-----------|--------|
+| LogisticRegression | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
+| RandomForest | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
+| XGBoost | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
+| PyTorch_MLP | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
+
+> Replace with values from your full-data run; above numbers are placeholders.
+
+## Interpretability & SHAP
+
+Model transparency is critical for both academic rigor and operational trust in the hospitality domain. We integrate SHAP (SHapley Additive exPlanations) to provide: (1) global feature importance, (2) per-booking local explanations, and (3) a human-readable feature name mapping.
+
+### Generated Interpretability Artifacts
+
+Produced automatically when a champion is finalized:
+
+- `artifacts/shap_summary.png` – Beeswarm (global impact distribution)
+- `artifacts/shap_importance_bar.png` – Top mean |SHAP| importance bar chart
+- `artifacts/feature_importance.json` – Mean absolute SHAP values (machine names)
+- `artifacts/shap_values_sample.json` – Sampled local explanations (true/false positive/negative exemplars)
+- `artifacts/feature_name_map.json` – Mapping to human-readable labels
+- `artifacts/threshold_sweep.csv` – Threshold vs. precision/recall/F1
+- `artifacts/classification_report.json` – Precision/recall/F1 by class
+- `artifacts/roc_curve.json`, `artifacts/pr_curve.json` – Curve coordinate data
+- `artifacts/confusion_matrix.png` – Visual confusion matrix
+
+### Top 10 Features (Sample Run)
+
+Example (LogisticRegression champion on a limited 800-row run):
+
+| Rank | Feature | Mean |SHAP| | Human Meaning |
+|------|---------|-------------|----------------|
+| 1 | country__te | 2.448 | Country (target encoded) |
+| 2 | assigned_room_type | 1.229 | Assigned room type code |
+| 3 | required_car_parking_spaces | 1.074 | Required car parking spaces |
+| 4 | reserved_room_type | 0.943 | Reserved room type code |
+| 5 | customer_type_target_encoded | 0.608 | Customer type (target encoded) |
+| 6 | distribution_channel_target_encoded | 0.458 | Distribution channel (target encoded) |
+| 7 | arrival_date_week_number | 0.416 | Week-of-year of arrival |
+| 8 | booking_changes | 0.384 | Number of booking modifications |
+| 9 | market_segment | 0.343 | Market segment raw category |
+| 10 | lead_time | 0.253 | Days between booking & arrival |
+
+> Values above are illustrative from a small sample run. For publication-quality reporting re-run on full dataset; SHAP magnitude ordering may shift slightly with more data and the final champion.
+
+### Local Explanation Examples
+
+From `shap_values_sample.json` (categories chosen: true_positive, false_positive, false_negative) – truncated illustration:
+
+```json
+{
+  "category": "true_positive",
+  "probability": 0.8560,
+  "top_positive_contributors": [
+    {"feature": "country__te", "shap": 2.1173},
+    {"feature": "assigned_room_type", "shap": 1.5004},
+    {"feature": "required_car_parking_spaces", "shap": 0.8191}
+  ],
+  "top_negative_contributors": [
+    {"feature": "reserved_room_type", "shap": -0.7972},
+    {"feature": "stays_in_weekend_nights", "shap": -0.4383},
+    {"feature": "arrival_date_day_of_month", "shap": -0.1705}
+  ]
+}
+```
+
+Interpretation (business context): The model increased cancellation probability primarily due to (a) encoded country signal, (b) an assigned room type differing from reservation (upgrade/downgrade friction), and (c) required parking (proxy for certain traveler segments). Weekend stays and specific reserved room characteristics slightly mitigated predicted risk.
+
+### Why SHAP?
+
+- Additive, locally accurate decomposition of prediction log-odds (for linear / tree models)
+- Consistent feature importance across heterogeneous model classes
+- Actionability: Revenue management and overbooking policies can target high-impact drivers (e.g., long lead time + specific channel + encoded country cluster)
+
+### Recomputing for Final Report
+
+Run on the full dataset (omit `--limit-rows`) to produce stable global rankings:
+
+```bash
+python scripts/train.py --cv-folds 5 --categorical-strategy target
+```
+
+Use `feature_importance.json` + `champion_meta.json` for publication tables. Optionally convert to LaTeX.
+
+### Notes & Future Enhancements
+
+- Calibrated probabilities (Platt / isotonic) for better risk thresholds
+- Drift monitoring: compare future SHAP distributions vs. baseline to detect market shifts
+- Grouped importance (aggregate one-hot / target-encoded families) for cleaner reporting
+The `/model/interpretability` endpoint provides: champion metadata, top global features, local explanation exemplars, and feature name mapping.
+
+---
+
 ## Environment Configuration
 
 The application supports environment-based configuration through `.env` files:
@@ -403,3 +526,66 @@ Jayampathy Balasuriya
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Training CLI Options
+
+The `scripts/train.py` script supports several optional arguments (inspect `--help` for the authoritative list):
+
+- `--cv-folds INT` – Enable stratified K-fold cross-validation
+- `--limit-rows INT` – Use only the first N rows (smoke tests / fast iteration)
+- `--categorical-strategy {onehot,target,drop}` – Encoding strategy
+- `--max-shap-samples INT` – (If implemented) Cap rows used for SHAP to control runtime
+
+## Produced Artifacts (Summary)
+
+| Artifact | Purpose |
+|----------|---------|
+| `artifacts/cv_metrics.json` | Cross-validation metrics per model + aggregates |
+| `artifacts/champion_meta.json` | Champion model identity + selection rationale |
+| `models/champion_model.pkl` | Persisted champion model for inference |
+| `artifacts/confusion_matrix.png` | Visual performance diagnostic |
+| `artifacts/roc_curve.json` / `pr_curve.json` | Curve data for reproducible plots |
+| `artifacts/threshold_sweep.csv` | Threshold tuning metrics grid |
+| `artifacts/classification_report.json` | Precision/Recall/F1 per class |
+| `artifacts/shap_summary.png` | Global SHAP beeswarm plot |
+| `artifacts/shap_importance_bar.png` | Ranked SHAP feature importances |
+| `artifacts/feature_importance.json` | Structured global SHAP stats |
+| `artifacts/shap_values_sample.json` | Local explanation exemplars |
+| `artifacts/feature_name_map.json` | Human-readable labels for features |
+
+## Readiness Checklist
+
+Use this before producing final academic or deployment results:
+
+1. Data present in `data/raw/` (expected rows & target distribution validated)
+2. Run full training (no `--limit-rows`):
+  ```bash
+  python scripts/train.py --cv-folds 5 --categorical-strategy target
+  ```
+3. Confirm artifacts directory contains all files listed above
+4. Inspect `champion_meta.json` – champion identity & metrics reasonable
+5. Optional: Tune decision threshold using `threshold_sweep.csv`
+6. Start API & verify endpoints:
+  ```bash
+  uvicorn main:app --port 8000
+  curl localhost:8000/health
+  curl localhost:8000/model/interpretability
+  ```
+7. Run tests:
+  ```bash
+  pytest -q
+  ```
+8. Launch MLflow UI and capture comparative metrics screenshot (for report)
+9. Archive artifact visuals (confusion matrix, SHAP plots) for appendix
+10. (Deployment) Build & push Docker image or run `docker-compose up` locally
+
+## Future Enhancements
+
+- Probability calibration (Platt / isotonic) for improved decision thresholds
+- Drift monitoring via periodic SHAP distribution comparison
+- Grouped feature attribution (aggregate encoded categories)
+- Automated LaTeX export of metrics & importance tables
+- Optional calibration & fairness diagnostics modules
+
+---
+Updated: 2025-10-05

@@ -1,0 +1,166 @@
+[
+  {
+    "feature": "country__te",
+    "mean_abs_shap": 2.4478794674583737
+  },
+  {
+    "feature": "assigned_room_type",
+    "mean_abs_shap": 1.2292134267322852
+  },
+  {
+    "feature": "required_car_parking_spaces",
+    "mean_abs_shap": 1.0739385157475132
+  },
+  {
+    "feature": "reserved_room_type",
+    "mean_abs_shap": 0.943180507826834
+  },
+  {
+    "feature": "customer_type_target_encoded",
+    "mean_abs_shap": 0.6076795794182774
+  },
+  {
+    "feature": "distribution_channel_target_encoded",
+    "mean_abs_shap": 0.45810250966087407
+  },
+  {
+    "feature": "arrival_date_week_number",
+    "mean_abs_shap": 0.41637208498584977
+  },
+  {
+    "feature": "booking_changes",
+    "mean_abs_shap": 0.3837048041027736
+  },
+  {
+    "feature": "market_segment",
+    "mean_abs_shap": 0.34318238318788763
+  },
+  {
+    "feature": "lead_time",
+    "mean_abs_shap": 0.25328323706615674
+  },
+  {
+    "feature": "stays_in_weekend_nights",
+    "mean_abs_shap": 0.22414044857210497
+  },
+  {
+    "feature": "distribution_channel",
+    "mean_abs_shap": 0.2235704884001155
+  },
+  {
+    "feature": "customer_type",
+    "mean_abs_shap": 0.2118530092700897
+  },
+  {
+    "feature": "adr",
+    "mean_abs_shap": 0.20954185649730556
+  },
+  {
+    "feature": "meal",
+    "mean_abs_shap": 0.16663292212155173
+  },
+  {
+    "feature": "children",
+    "mean_abs_shap": 0.15903135309714103
+  },
+  {
+    "feature": "hotel_target_encoded",
+    "mean_abs_shap": 0.14269724183074478
+  },
+  {
+    "feature": "stays_in_week_nights",
+    "mean_abs_shap": 0.13258680873457332
+  },
+  {
+    "feature": "market_segment_target_encoded",
+    "mean_abs_shap": 0.11928058470766016
+  },
+  {
+    "feature": "arrival_date_day_of_month",
+    "mean_abs_shap": 0.11224603968494877
+  },
+  {
+    "feature": "is_family",
+    "mean_abs_shap": 0.10449664082115868
+  },
+  {
+    "feature": "reserved_room_type_target_encoded",
+    "mean_abs_shap": 0.0810695327188162
+  },
+  {
+    "feature": "babies",
+    "mean_abs_shap": 0.06661767704892527
+  },
+  {
+    "feature": "adults",
+    "mean_abs_shap": 0.058759430529566684
+  },
+  {
+    "feature": "total_guests",
+    "mean_abs_shap": 0.05230127952416154
+  },
+  {
+    "feature": "guest_type__te",
+    "mean_abs_shap": 0.0296185640776932
+  },
+  {
+    "feature": "total_of_special_requests",
+    "mean_abs_shap": 0.01639878625438134
+  },
+  {
+    "feature": "total_stay_duration",
+    "mean_abs_shap": 0.0020724309329571396
+  },
+  {
+    "feature": "hotel",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "arrival_date_year",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "arrival_date_month",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "is_repeated_guest",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "previous_cancellations",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "previous_bookings_not_canceled",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "deposit_type",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "days_in_waiting_list",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "is_peak_season",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "is_summer_peak",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "is_holiday_season",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "arrival_season__te",
+    "mean_abs_shap": 0.0
+  },
+  {
+    "feature": "arrival_quarter__te",
+    "mean_abs_shap": 0.0
+  }
+]

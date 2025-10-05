@@ -1,0 +1,38 @@
+{
+  "selection_metric": "f1_score_mean",
+  "tie_breaker": "roc_auc_mean",
+  "model_name": "LogisticRegression",
+  "aggregate": {
+    "accuracy_mean": 0.8599635793603859,
+    "accuracy_std": 0.026914188542261092,
+    "precision_mean": 0.7183286308286307,
+    "precision_std": 0.03889843029517339,
+    "recall_mean": 0.8036529680365296,
+    "recall_std": 0.09324464774731567,
+    "f1_score_mean": 0.7572503256044966,
+    "f1_score_std": 0.05552896060227671,
+    "roc_auc_mean": 0.923731291917191,
+    "roc_auc_std": 0.014314745069713737
+  },
+  "cv_folds": 3,
+  "timestamp": "2025-10-05T01:39:59.305119+00:00",
+  "notes": "Model will be (re)trained on training split below; final persisted champion artifact occurs after training.",
+  "persisted_path": "models/champion_model.pkl",
+  "holdout_metrics": {
+    "accuracy": 0.8875,
+    "precision": 0.7708333333333334,
+    "recall": 0.8409090909090909,
+    "f1_score": 0.8043478260869565,
+    "roc_auc": 0.932014106583072
+  },
+  "holdout_timestamp": "2025-10-05T01:40:08.118146+00:00",
+  "decision_threshold": 0.51,
+  "decision_threshold_metrics": {
+    "precision": 0.7872340425531915,
+    "recall": 0.8409090909090909,
+    "f1_score": 0.8131868131868132
+  },
+  "diagnostics_generated": "2025-10-05T01:40:08.802627+00:00",
+  "shap_generated": true,
+  "shap_timestamp": "2025-10-05T01:40:09.501043+00:00"
+}

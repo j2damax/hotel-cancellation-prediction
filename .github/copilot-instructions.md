@@ -19,17 +19,17 @@ This is a production-ready ML service for predicting hotel booking cancellations
 
 ### Core Components & Data Flow
 
-- `scripts/train.py`: Trains 4 models (LogReg, RandomForest, XGBoost, PyTorch MLP) with synthetic data generation
-- `main.py`: FastAPI app that loads XGBoost as default production model with Pydantic validation
-- `models/`: Stores trained models (XGBoost pkl) and preprocessing artifact (`preprocessor.pkl` consolidating scaling & categorical handling)
+- `scripts/train.py`: Trains 4 models (LogReg, RandomForest, XGBoost, PyTorch MLP), optional stratified cross-validation, champion selection & persistence, diagnostics + SHAP artifact generation
+- `main.py`: FastAPI app that loads the persisted champion model dynamically with Pydantic validation
+- `models/`: Stores persisted champion model (`champion_model.pkl`) and preprocessing artifact (`preprocessor.pkl` consolidating scaling & categorical handling)
 - `mlruns/`: MLflow experiment tracking database (local filesystem)
 
 ### Key Architecture Decisions
 
-- **XGBoost as Champion Model**: Based on academic evaluation, XGBoost achieved highest F1-score (0.893) and ROC-AUC (0.958) in 5-fold cross-validation
+- **Dynamic Champion Selection**: Champion chosen per run via stratified cross-validation (primary metric F1; ROC-AUC tie-break). Historical experiments often favored XGBoost, but no model is hard-coded.
 - **Academic Rigor**: Models evaluated using stratified cross-validation with Optuna hyperparameter optimization
 - **Interpretability Focus**: SHAP (SHapley Additive exPlanations) used for model explainability and business insights
-- **Shared Preprocessing**: Single StandardScaler trained during model training, reused for API inference
+- **Shared Preprocessing**: Single preprocessing pipeline (scaling + categorical encoding) reused for API inference
 - **Feature Engineering**: Novel features created (total_stay_duration, is_family, guest_type) for enhanced predictive power
 - **Class Imbalance Handling**: 32.8% cancellation rate addressed using class weights rather than resampling
 
@@ -66,12 +66,7 @@ docker-compose up  # Runs API + MLflow UI with volume mounts for persistence
 
 ### Model Loading Pattern
 
-Models are loaded via MLflow artifacts but fall back to joblib for XGBoost if MLflow fails. The pattern in `main.py`:
-
-```python
-model = mlflow.xgboost.load_model("models/xgboost_model")  # Preferred
-# Fallback: model = joblib.load("models/xgboost_model.pkl")
-```
+Inference loads `models/champion_model.pkl` (persisted after training). If future registry integration is added, replace with MLflow Model Registry URI loading.
 
 ### Academic Evaluation Framework
 
@@ -147,37 +142,13 @@ When modifying models, verify the complete pipeline:
 - **Prediction errors**: Check feature schema matches training data preprocessing
 - **MLflow issues**: Verify `mlruns/` directory structure matches experiment logging
 
-### Predicting Hotel Bookings Cancelations Flow
+### Training & Interpretability Flow (Current)
 
-1. Load the data set and plot the distribution of the target variable to understand class imbalance.
-2. EDA (Exploratory Data Analysis)
-   - plot number of missing values in each column.
-   - Check reservation_status and reservation_status_date has been updated after the booking is canceled.
-   - Column company and agent have a high percentage of missing values. So, we can drop these two columns.
-   - Drop columns by pipe line: agent, company, country, reservation_status, reservation_status_date, booking_changes
-   - check lead time increases the chance of cancellation.
-   - Spital analysis find where the customers are coming from.
-   - corelation analysis to find the relationship between the features and the target variable, select the most important features.
-   - perform mean encoding for categorical variables.
-     handling outlier data
-   - SMOTE method to handle the class imbalance problem.
-3. Preprocess the data (e.g., handle missing values, encode categorical variables).
-4. Split the data into training and testing sets.
-5. Train the model using the training set.
-6. Evaluate the model on the testing set and log metrics to MLflow.
-7. Random Forrest and Logistic Regression are used for the model training.
-8. Split the data into to train and test sets.
-9. Build categorical and continuous pipelines.
-10. Fit model
-11. Initialize search space for hyperparameter tuning.
-12. Use RandomizedSearchCV for hyperparameter tuning.
-13. Find best hyperparameters and fit the model.
-14. Regularization parameter C for Logistic Regression.
-15. Number of trees in the forest for Random Forest.
-16. Maximum depth of the tree for Random Forest.
-17. Evaluate the model using accuracy, precision, recall, and F1-score.
-18. cross validation is used for model evaluation.
-    18 Find which variable is most important for the prediction using SHAP (SHapley Additive exPlanations)
+1. Run `python scripts/train.py --cv-folds 5` (optional folds) to train and evaluate models.
+2. Cross-validation metrics written to `artifacts/cv_metrics.json`.
+3. Champion selected and persisted to `models/champion_model.pkl`; metadata in `artifacts/champion_meta.json`.
+4. Diagnostics generated: `confusion_matrix.png`, `roc_curve.json`, `pr_curve.json`, `threshold_sweep.csv`, `classification_report.json`.
+5. SHAP artifacts produced: `shap_summary.png`, `shap_importance_bar.png`, `feature_importance.json`, `shap_values_sample.json`, `feature_name_map.json`.
+6. API endpoint `/model/interpretability` serves champion + global feature importance + sampled local explanations.
 
-Logisytic Regression, naive bayes, random forest, Descision tree, KNN
-Random Forrest confusion matrix
+Legacy exploration algorithms (Naive Bayes, Decision Tree, KNN) remain out-of-scope for the production pipeline to maintain academic rigor and manageable complexity.

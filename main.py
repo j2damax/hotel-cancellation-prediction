@@ -4,7 +4,8 @@ Provides REST API endpoint for making predictions.
 """
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from contextlib import asynccontextmanager
+from pydantic import BaseModel, Field, ConfigDict
 import pandas as pd
 import numpy as np
 import mlflow
@@ -24,10 +25,24 @@ MODEL_TYPE = os.getenv("MODEL_TYPE", "xgboost")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Initialize FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("=" * 80)
+    print("Starting Hotel Cancellation Prediction API (lifespan init)")
+    print("=" * 80)
+    load_model_and_scaler()
+    load_inference_artifacts()
+    print("Initialization complete.")
+    print("=" * 80)
+    yield
+    # Optional teardown logic here (e.g., close DB connections)
+    print("Shutting down API - resources released.")
+
 app = FastAPI(
     title="Hotel Cancellation Prediction API",
     description="API for predicting hotel booking cancellations using ML models",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 
@@ -47,8 +62,8 @@ class BookingFeatures(BaseModel):
     required_car_parking_spaces: int = Field(..., description="Number of parking spaces required", ge=0)
     total_of_special_requests: int = Field(..., description="Number of special requests", ge=0)
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "lead_time": 120,
                 "arrival_month": 7,
@@ -64,6 +79,7 @@ class BookingFeatures(BaseModel):
                 "total_of_special_requests": 2
             }
         }
+    )
 
 
 class PredictionResponse(BaseModel):
@@ -77,6 +93,24 @@ class HealthResponse(BaseModel):
     """Response model for health check."""
     status: str
     model_loaded: bool
+
+
+class LocalExplanation(BaseModel):
+    category: str
+    probability: Optional[float] = None
+    top_positive_contributors: List[Dict[str, float]]
+    top_negative_contributors: List[Dict[str, float]]
+
+
+class InterpretabilityResponse(BaseModel):
+    champion_model: Optional[str]
+    shap_generated: bool
+    shap_timestamp: Optional[str]
+    decision_threshold: Optional[float]
+    top_features: List[Dict[str, Any]]
+    local_examples: List[LocalExplanation]
+    feature_name_map: Dict[str, str]
+    artifacts_available: List[str]
 
 
 from src.preprocessing import PreprocessingPipeline
@@ -269,15 +303,7 @@ def _build_feature_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Load model and scaler on startup."""
-    print("=" * 80)
-    print("Starting Hotel Cancellation Prediction API")
-    print("=" * 80)
-    load_model_and_scaler()
-    load_inference_artifacts()
-    print("=" * 80)
+## Removed deprecated on_event startup in favor of lifespan context
 
 
 @app.get("/", response_model=dict)
@@ -404,6 +430,100 @@ async def predict_batch(bookings: List[BookingFeatures]):
             status_code=500,
             detail=f"Error making batch prediction: {str(e)}"
         )
+
+
+@app.get("/model/interpretability", response_model=InterpretabilityResponse)
+async def get_interpretability(top_k: int = 15):
+    """Return global & sample local interpretability metadata.
+
+    Reads artifacts produced by training script. If SHAP artifacts are missing, returns shap_generated=False
+    with empty lists, allowing clients to degrade gracefully.
+    """
+    artifacts_present = []
+    artifacts_dir = ARTIFACT_DIR
+    champion_meta_path = os.path.join(artifacts_dir, 'champion_meta.json')
+    feature_importance_path = os.path.join(artifacts_dir, 'feature_importance.json')
+    shap_local_path = os.path.join(artifacts_dir, 'shap_values_sample.json')
+    feature_name_map_path = os.path.join(artifacts_dir, 'feature_name_map.json')
+
+    champion_model = None
+    shap_generated = False
+    shap_timestamp = None
+    decision_threshold = None
+    top_features: List[Dict[str, Any]] = []
+    local_examples: List[LocalExplanation] = []
+    feature_name_map: Dict[str, str] = {}
+
+    # Champion metadata
+    if os.path.exists(champion_meta_path):
+        try:
+            with open(champion_meta_path) as f:
+                champ_meta = json.load(f)
+            champion_model = champ_meta.get('model_name')
+            decision_threshold = champ_meta.get('decision_threshold')
+            shap_generated = bool(champ_meta.get('shap_generated'))
+            shap_timestamp = champ_meta.get('shap_timestamp')
+            artifacts_present.append('champion_meta.json')
+        except Exception:
+            pass
+
+    # Feature name map
+    if os.path.exists(feature_name_map_path):
+        try:
+            with open(feature_name_map_path) as f:
+                feature_name_map = json.load(f)
+            artifacts_present.append('feature_name_map.json')
+        except Exception:
+            feature_name_map = {}
+
+    # Global feature importance
+    if os.path.exists(feature_importance_path):
+        try:
+            with open(feature_importance_path) as f:
+                importance = json.load(f)
+            # importance is list of {feature, mean_abs_shap}
+            for item in importance[:top_k]:
+                feat = item.get('feature')
+                human = feature_name_map.get(feat, feat)
+                top_features.append({
+                    'feature': feat,
+                    'human_readable': human,
+                    'mean_abs_shap': item.get('mean_abs_shap')
+                })
+            artifacts_present.append('feature_importance.json')
+        except Exception:
+            top_features = []
+
+    # Local examples (convert raw shap values into top +/- lists)
+    if os.path.exists(shap_local_path):
+        try:
+            with open(shap_local_path) as f:
+                local_raw = json.load(f)
+            for rec in local_raw:
+                shap_dict = rec.get('shap_values', {})
+                # Sort positive and negative contributions separately
+                positives = sorted([ (k,v) for k,v in shap_dict.items() if v > 0 ], key=lambda x: x[1], reverse=True)[:5]
+                negatives = sorted([ (k,v) for k,v in shap_dict.items() if v < 0 ], key=lambda x: x[1])[:5]
+                local_examples.append(LocalExplanation(
+                    category=rec.get('category','sample'),
+                    probability=rec.get('probability'),
+                    top_positive_contributors=[{'feature': f, 'shap': v, 'human_readable': feature_name_map.get(f, f)} for f,v in positives],
+                    top_negative_contributors=[{'feature': f, 'shap': v, 'human_readable': feature_name_map.get(f, f)} for f,v in negatives]
+                ))
+            artifacts_present.append('shap_values_sample.json')
+        except Exception:
+            local_examples = []
+
+    return InterpretabilityResponse(
+        champion_model=champion_model,
+        shap_generated=shap_generated and bool(top_features),
+        shap_timestamp=shap_timestamp,
+        decision_threshold=decision_threshold,
+        top_features=top_features,
+        local_examples=local_examples,
+        feature_name_map=feature_name_map,
+        artifacts_available=artifacts_present
+    )
 
 
 if __name__ == "__main__":
