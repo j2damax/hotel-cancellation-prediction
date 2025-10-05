@@ -1,533 +1,177 @@
-# AWS ECR Deployment Guide
+# Hugging Face Space Deployment Guide
 
-This guide provides step-by-step instructions for deploying the Hotel Cancellation Prediction API to Amazon Elastic Container Registry (ECR) and running it on AWS services.
+This document is the canonical deployment reference. The project now targets only a Hugging Face Space deployment (FastAPI or Docker Space). All previous cloud-specific (e.g., AWS) deployment paths have been fully removed from the repository.
+
+## Overview
+
+You can expose the FastAPI inference service as a public (or private) Hugging Face Space using either a plain FastAPI Space or a Docker Space. The service dynamically loads model artifacts (preprocessor + champion model + metadata) from a Hugging Face model repository you control (specified by `HF_MODEL_REPO`).
+
+## When to Use a Space
+
+| Use Case | Recommendation |
+|----------|----------------|
+| Public academic demo | FastAPI Space (quick build) |
+| Needs custom system packages | Docker Space |
+| Strict dependency pinning | Docker Space with explicit `requirements.txt` |
+| Prototyping new features | FastAPI Space (faster iteration) |
 
 ## Prerequisites
 
-- AWS Account with appropriate permissions
-- AWS CLI installed and configured
-- Docker installed locally
-- Models trained and available in the `models/` and `mlruns/` directories
-- (New) S3 bucket created for model artifacts (versioned): e.g. `hotel-cancel-models-prod-<id>`
-- IAM user/role with least-privilege S3 + ECR + (future) ECS permissions
+- Hugging Face account
+- A model repo containing: `champion_model.pkl`, `preprocessor.pkl`, `champion_meta.json` (pushed via your training + publish scripts)
+- (Optional) Additional interpretability artifacts (feature importance, SHAP samples)
 
-## Model Artifact Storage (S3)
-
-The container will no longer bake model artifacts; instead it fetches the champion at startup.
-
-Bucket layout (versioned):
-```
-s3://hotel-cancel-models-prod-<id>/models/
-  latest.txt                # contains current model_version (e.g. run_20251005_123045)
-  run_20251005_123045/
-    champion_model.pkl
-    preprocessor.pkl
-    champion_meta.json
-```
-
-### Minimal S3 Policy (adjust bucket name)
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::hotel-cancel-models-prod-<id>"]},
-    {"Effect": "Allow", "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"], "Resource": ["arn:aws:s3:::hotel-cancel-models-prod-<id>/*"]}
-  ]
-}
-```
-
-### New Environment Variables
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| MODEL_S3_URI | Base S3 URI for model versions | s3://hotel-cancel-models-prod-<id>/models |
-| MODEL_VERSION | Explicit version or `latest` sentinel | latest |
-| DECISION_THRESHOLD | App classification threshold | 0.35 |
-| AWS_REGION | Region for S3/ECR | eu-west-1 |
-
-At startup the API will:
-1. Resolve `MODEL_VERSION` (read `latest.txt` if value is `latest`).
-2. Download artifacts if not cached locally or version mismatch.
-3. Load model & preprocessor; expose `model_version` on `/health`.
-
-Publishing script (`scripts/publish_model.py`) will:
-1. Read `artifacts/champion_meta.json` to get a model_version identifier.
-2. Upload artifacts to versioned prefix.
-3. Update `latest.txt` atomically.
-
-Rollback: set `latest.txt` to previous version and restart task/service.
-
-## Step 1: Train Models Locally
-
-Before deploying, ensure you have trained models:
+## 1. Create (or Clone) the Space
 
 ```bash
-python scripts/train.py
+git clone https://huggingface.co/spaces/<org-or-user>/<space-name>
+cd <space-name>
 ```
 
-This will create:
-- `models/preprocessor.pkl` - Unified preprocessing pipeline (scaling + categorical strategy)
-- `mlruns/` - MLflow tracking data with trained models
+If starting fresh, create the Space in the UI (FastAPI or Docker type) then clone it locally.
 
-## Step 2: Configure AWS CLI
+## 2. Add Runtime Files
+
+From your project root (sibling to the Space clone):
 
 ```bash
-# Configure AWS credentials
-aws configure
-
-# Verify configuration
-aws sts get-caller-identity
+cp ../hotel-cancellation-prediction/main.py .
+cp -R ../hotel-cancellation-prediction/app ./app
+cp ../hotel-cancellation-prediction/requirements.txt .
 ```
 
-## Step 3: Create ECR Repository
+Trim `requirements.txt` to inference essentials if desired:
+```
+fastapi
+uvicorn[standard]
+pydantic
+scikit-learn==1.7.2
+xgboost
+pandas
+numpy
+joblib
+huggingface_hub
+python-dotenv
+```
+Add `torch` only if your active champion uses the PyTorch MLP.
+
+## 3. (Optional) Dockerfile (for Docker Space)
+
+```dockerfile
+FROM python:3.10-slim
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
+COPY main.py ./
+COPY app ./app
+EXPOSE 7860
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+```
+
+Plain FastAPI Space: only `main.py` and `requirements.txt` are required.
+
+## 4. Configure Environment Variables (Space Settings)
+
+```
+HF_MODEL_REPO=<org-or-user>/hotel-cancel-champion   # Required
+# Optional
+DECISION_THRESHOLD=0.42
+ALLOW_START_WITHOUT_MODEL=true   # Development only
+```
+
+Resolution order for decision threshold:
+1. ENV `DECISION_THRESHOLD`
+2. `champion_meta.json` value
+3. Default `0.5`
+
+Artifact load order: local committed files (if any) → Hugging Face Hub (`HF_MODEL_REPO`).
+
+## 5. Commit & Push
 
 ```bash
-# Set variables
-AWS_REGION="us-east-1"  # Change to your preferred region
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-REPO_NAME="hotel-cancellation-prediction"
-
-# Create ECR repository
-aws ecr create-repository \
-    --repository-name ${REPO_NAME} \
-    --region ${AWS_REGION} \
-    --image-scanning-configuration scanOnPush=true \
-    --encryption-configuration encryptionType=AES256
-
-# Output will include the repository URI
+git add .
+git commit -m "Add FastAPI inference service"
+git push
 ```
 
-## Step 4: Authenticate Docker to ECR
+The build log will show dependency installation and first artifact download (if needed).
+
+## 6. Test Endpoints
 
 ```bash
-# Login to ECR
-aws ecr get-login-password --region ${AWS_REGION} | \
-    docker login --username AWS --password-stdin \
-    ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+curl -s https://huggingface.co/spaces/<org-or-user>/<space-name>/health
+curl -s -X POST https://huggingface.co/spaces/<org-or-user>/<space-name>/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"lead_time":30,"arrival_month":7,"adults":2,"children":0,"adr":120.0}'
 ```
 
-## Step 5: Build Docker Image
+Docker Spaces sometimes proxy through `/proxy/`; if health returns 404, try:
+```
+https://huggingface.co/spaces/<org-or-user>/<space-name>/proxy/health
+```
+
+## 7. Updating the Model
+
+1. Retrain locally: `python scripts/train.py`
+2. Publish artifacts: `python scripts/push_to_hf.py`
+3. (If threshold changed) optionally set `DECISION_THRESHOLD` in Space settings
+4. Trigger Space rebuild (restart from UI or push a no-op commit)
+
+## 8. Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| 503 model_not_loaded | `HF_MODEL_REPO` missing | Add env var in Space settings |
+| InconsistentVersionWarning | Artifact sklearn > runtime | Pin `scikit-learn==1.7.2` |
+| 500 during preprocess | Code drift vs. serialized pipeline | Align `app/` preprocessing code |
+| Slow first response | Cold start & artifact download | Subsequent requests faster |
+| PermissionError writing model | Read-only FS in Space | Loader falls back to `/tmp` automatically |
+
+## 9. Security
+
+- Never commit secrets. Use Space secret variables.
+- Rotate any historical cloud credentials that may have been exposed (legacy AWS phase).
+- Make the model repo private if artifacts should not be public.
+
+## 10. Minimizing Image / Build Time
+
+Remove: notebooks, `mlruns/`, large optional dependencies (e.g., `torch` if unused). Keep only inference stack. This reduces cold start time and image size.
+
+## 11. Local Docker Run (Parity Test)
 
 ```bash
-# Build the Docker image
-docker build -t ${REPO_NAME}:latest .
-
-# Verify the image
-docker images ${REPO_NAME}
+docker build -t hotel-cancel .
+docker run -p 8000:7860 -e HF_MODEL_REPO=<org-or-user>/hotel-cancel-champion hotel-cancel
+curl localhost:8000/health
 ```
 
-## Step 6: Tag and Push to ECR
+## 12. Operational Notes
 
-```bash
-# Tag the image for ECR
-docker tag ${REPO_NAME}:latest \
-    ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}:latest
+- Threshold source is reported via the health/metrics endpoints (if implemented).
+- To test a new model version before making it public, publish to a staging repo and point a private Space at it.
+- Consider adding a lightweight smoke test script that hits `/health` + `/predict` post-build.
 
-# Also tag with version number (optional)
-docker tag ${REPO_NAME}:latest \
-    ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}:v1.0.0
-
-# Push to ECR
-docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}:latest
-docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO_NAME}:v1.0.0
-```
-
-## Step 7: Verify Image in ECR
-
-```bash
-# List images in repository
-aws ecr describe-images \
-    --repository-name ${REPO_NAME} \
-    --region ${AWS_REGION}
-```
-
-## Deployment Options
-
-### Option A: Deploy to Amazon ECS (Fargate)
-
-#### 1. Create ECS Cluster
-
-```bash
-CLUSTER_NAME="hotel-prediction-cluster"
-
-aws ecs create-cluster \
-    --cluster-name ${CLUSTER_NAME} \
-    --region ${AWS_REGION}
-```
-
-#### 2. Create Task Definition
-
-Create a file `task-definition.json`:
-
-```json
-{
-  "family": "hotel-cancellation-prediction",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "1024",
-  "memory": "2048",
-  "containerDefinitions": [
-    {
-      "name": "api",
-      "image": "YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/hotel-cancellation-prediction:latest",
-      "portMappings": [
-        {
-          "containerPort": 8000,
-          "protocol": "tcp"
-        }
-      ],
-      "essential": true,
-      "environment": [],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/hotel-cancellation-prediction",
-          "awslogs-region": "YOUR_REGION",
-          "awslogs-stream-prefix": "ecs"
-        }
-      },
-      "healthCheck": {
-        "command": ["CMD-SHELL", "python -c \"import requests; requests.get('http://localhost:8000/health')\" || exit 1"],
-        "interval": 30,
-        "timeout": 5,
-        "retries": 3,
-        "startPeriod": 60
-      }
-    }
-  ],
-  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole"
-}
-```
-
-Replace placeholders and register:
-
-```bash
-aws ecs register-task-definition \
-    --cli-input-json file://task-definition.json \
-    --region ${AWS_REGION}
-```
-
-#### 3. Create CloudWatch Log Group
-
-```bash
-aws logs create-log-group \
-    --log-group-name /ecs/hotel-cancellation-prediction \
-    --region ${AWS_REGION}
-```
-
-#### 4. Create ECS Service
-
-```bash
-# Requires VPC and subnets to be configured
-aws ecs create-service \
-    --cluster ${CLUSTER_NAME} \
-    --service-name hotel-prediction-service \
-    --task-definition hotel-cancellation-prediction \
-    --desired-count 1 \
-    --launch-type FARGATE \
-    --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxxx],securityGroups=[sg-xxxxx],assignPublicIp=ENABLED}" \
-    --region ${AWS_REGION}
-```
-
-### Option B: Deploy to Amazon EKS
-
-#### 1. Create EKS Cluster (if not exists)
-
-```bash
-eksctl create cluster \
-    --name hotel-prediction-cluster \
-    --region ${AWS_REGION} \
-    --nodegroup-name standard-workers \
-    --node-type t3.medium \
-    --nodes 2
-```
-
-#### 2. Create Kubernetes Deployment
-
-Create `k8s-deployment.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hotel-cancellation-prediction
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: hotel-prediction
-  template:
-    metadata:
-      labels:
-        app: hotel-prediction
-    spec:
-      containers:
-      - name: api
-        image: YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/hotel-cancellation-prediction:latest
-        ports:
-        - containerPort: 8000
-        resources:
-          requests:
-            memory: "1Gi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "1000m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: hotel-prediction-service
-spec:
-  type: LoadBalancer
-  selector:
-    app: hotel-prediction
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 8000
-```
+Updated: 2025-10-05 (Simplified to Hugging Face Space only; removed residual cloud-specific deployment and monitoring content)
 
-Deploy:
+## Appendix: Operational Intents (Non-Cloud Specific)
 
-```bash
-kubectl apply -f k8s-deployment.yaml
-kubectl get services hotel-prediction-service
-```
+While this repository no longer documents cloud-provider deployment steps, you can adapt the application to other platforms by:
 
-### Option C: Deploy to AWS App Runner
+- Building a minimal container image (see section above) and pushing to your chosen registry
+- Using any container orchestrator (Kubernetes, Nomad, Fly.io, Render, etc.) to run `uvicorn main:app`
+- Exposing `/health` and `/predict` HTTP endpoints via your platform's routing / ingress
+- Optionally scraping a JSON `/metrics` endpoint if you add one (current example shown in README)
 
-```bash
-# Create App Runner service from ECR
-aws apprunner create-service \
-    --service-name hotel-cancellation-prediction \
-    --source-configuration '{
-        "ImageRepository": {
-            "ImageIdentifier": "'${AWS_ACCOUNT_ID}'.dkr.ecr.'${AWS_REGION}'.amazonaws.com/'${REPO_NAME}':latest",
-            "ImageRepositoryType": "ECR",
-            "ImageConfiguration": {
-                "Port": "8000"
-            }
-        },
-        "AutoDeploymentsEnabled": true
-    }' \
-    --instance-configuration '{
-        "Cpu": "1 vCPU",
-        "Memory": "2 GB"
-    }' \
-    --region ${AWS_REGION}
-```
+Key considerations if you self-host elsewhere:
+1. Artifact Synchronization: either bake artifacts into the image (slower updates) or mount / pull from HF Hub at startup (current design).
+2. Cold Start: first request may incur artifact download; consider a warm-up probe script post-deploy.
+3. Observability: add structured logging (JSON) and ship logs to your aggregator of choice (e.g., OpenTelemetry collector).
+4. Security: treat `HF_MODEL_REPO` as public info unless the repo is private; never embed secrets in the image.
+5. Scaling: the FastAPI app is stateless; scale horizontally behind a load balancer; model reload endpoint (if added) should propagate via rolling restart or shared volume.
 
-## Testing Deployment
+If future multi-cloud or provider-specific automation is reintroduced, it should live in a separate `deploy/` directory to avoid coupling the core ML workflow to any single platform.
 
-After deployment, test the API:
-
-```bash
-# Get the service URL (example for ECS with ALB)
-SERVICE_URL="http://your-alb-url.region.elb.amazonaws.com"
-
-# Health check
-curl ${SERVICE_URL}/health
-
-# Make a prediction
-curl -X POST "${SERVICE_URL}/predict" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "lead_time": 120,
-    "arrival_month": 7,
-    "stays_weekend_nights": 2,
-    "stays_week_nights": 3,
-    "adults": 2,
-    "children": 1,
-    "is_repeated_guest": 0,
-    "previous_cancellations": 0,
-    "booking_changes": 1,
-    "adr": 95.50,
-    "required_car_parking_spaces": 0,
-    "total_of_special_requests": 2
-  }'
-
-# Metrics (lightweight, JSON)
-curl ${SERVICE_URL}/metrics | jq
-
-# Reload model to a specific version (e.g. rollback) – requires that version folder exists in S3
-curl -X POST ${SERVICE_URL}/model/reload \
-  -H "Content-Type: application/json" \
-  -d '{"version":"2025-10-05T11_16_52_449001_00_00"}' | jq
-
-# Force reload latest (even if unchanged) with threshold override
-curl -X POST ${SERVICE_URL}/model/reload \
-  -H "Content-Type: application/json" \
-  -d '{"version":"latest","force":true,"threshold_override":0.40}' | jq
-```
-
-## Continuous Deployment
-
-### Using GitHub Actions
-
-Create `.github/workflows/deploy.yml`:
-
-```yaml
-name: Deploy to ECR
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
-    
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
-    
-    - name: Build, tag, and push image to Amazon ECR
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: hotel-cancellation-prediction
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-```
-
-## Monitoring and Logging
-
-### CloudWatch Logs
-### Custom Metrics Exposure
-
-The `/metrics` endpoint (JSON) now returns:
-
-```json
-{
-  "uptime_seconds": 123.456,
-  "model_loaded": true,
-  "model_version": "2025-10-05T11_16_52_449001_00_00",
-  "decision_threshold": 0.35,
-  "prediction_request_count": 42,
-  "avg_prediction_latency_ms": 18.72,
-  "last_model_reload_time": 1730723456.123,
-  "last_model_reload_version": "2025-10-05T11_16_52_449001_00_00"
-}
-```
-
-For production-grade observability you can:
-- Scrape this endpoint via a sidecar or scheduled Lambda and push to CloudWatch custom metrics.
-- Replace with Prometheus exposition format (future enhancement) if moving to EKS.
-
-### Model Reload Operations
-
-Use `/model/reload` to:
-- Roll forward: publish new version to S3 (updates `latest.txt`), then POST `{ "version": "latest" }`.
-- Roll back: POST with an older explicit version folder name.
-- Tune threshold without redeploy: POST `{ "threshold_override": 0.40 }`.
-
-Response fields:
-| Field | Meaning |
-|-------|---------|
-| reloaded | Whether a reload occurred (false if version unchanged and force=false) |
-| previous_version | Version before reload |
-| new_version | Effective version after reload |
-| active_threshold | Threshold now in effect (may reflect override) |
-| threshold_source | env | champion_meta | default |
-
-Concurrency: reload is synchronous and briefly blocks only the calling request. Prediction endpoints continue using the prior model until the new one is fully loaded.
-
-### Recommended Alarms
-- Health endpoint returning model_not_loaded for >5 minutes.
-- Rapid increase in avg_prediction_latency_ms (>500ms sustained).
-- Decision threshold drift from expected baseline (optional business rule alarm).
-
-
-```bash
-# View logs
-aws logs tail /ecs/hotel-cancellation-prediction --follow
-```
-
-### CloudWatch Metrics
-
-Set up custom metrics for:
-- Request rate
-- Response time
-- Error rate
-- Prediction latency
-
-## Cost Optimization
-
-1. **Use Fargate Spot** for non-production environments
-2. **Enable Auto Scaling** based on CPU/memory
-3. **Use ECR Lifecycle Policies** to clean up old images
-4. **Monitor CloudWatch metrics** to right-size resources
-
-## Security Best Practices
-
-1. Enable ECR image scanning
-2. Use IAM roles for service authentication
-3. Implement VPC endpoints for private ECR access
-4. Enable encryption at rest and in transit
-5. Regularly update base images
-6. Use AWS Secrets Manager for sensitive configuration
-
-## Cleanup
-
-To avoid ongoing charges:
-
-```bash
-# Delete ECS service
-aws ecs delete-service --cluster ${CLUSTER_NAME} --service hotel-prediction-service --force
-
-# Delete ECS cluster
-aws ecs delete-cluster --cluster ${CLUSTER_NAME}
-
-# Delete ECR images
-aws ecr batch-delete-image \
-    --repository-name ${REPO_NAME} \
-    --image-ids imageTag=latest
-
-# Delete ECR repository
-aws ecr delete-repository --repository-name ${REPO_NAME} --force
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Authentication Failed**: Re-run ECR login command
-2. **Image Pull Failed**: Check IAM permissions
-3. **Health Check Failed**: Verify model files are included in image
-4. **Out of Memory**: Increase task memory allocation
-
-### Useful Commands
-
-```bash
-# Check ECS task logs
-aws ecs describe-tasks --cluster ${CLUSTER_NAME} --tasks TASK_ID
-
-# Check ECR repository
-aws ecr describe-repositories --repository-names ${REPO_NAME}
-
-# Get ECR image details
-aws ecr describe-images --repository-name ${REPO_NAME}
-```
-
-## Support
-
-For issues or questions, please refer to:
-- AWS ECS Documentation: https://docs.aws.amazon.com/ecs/
-- AWS ECR Documentation: https://docs.aws.amazon.com/ecr/
-- Project Repository: https://github.com/j2damax/hotel-cancellation-prediction
+---
+End of Hugging Face–only deployment guide.

@@ -188,7 +188,7 @@ Model + preprocessing:
 
 - **Customize Models**: Edit `scripts/train.py` to adjust model parameters
 - **Add Real Data**: Place your data in `data/raw/` and modify the data loading
-- **Deploy to AWS**: Follow the [DEPLOYMENT.md](DEPLOYMENT.md) guide
+- **Deploy to Hugging Face Space**: See `[DEPLOYMENT.md](DEPLOYMENT.md)` for the Space-only guide
 - **API Documentation**: Visit http://localhost:8000/docs for full API reference
 - **Model Monitoring**: Implement monitoring with MLflow in production
 
@@ -246,7 +246,7 @@ ModuleNotFoundError: No module named 'xxx'
 ## Getting Help
 
 - Check [README.md](README.md) for detailed documentation
-- Review [DEPLOYMENT.md](DEPLOYMENT.md) for AWS deployment
+- Review [DEPLOYMENT.md](DEPLOYMENT.md) for Hugging Face Space deployment
 - Open an issue on GitHub for bugs or questions
 
 ## Example Use Cases

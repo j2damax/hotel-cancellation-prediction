@@ -4,7 +4,7 @@ A Data-Driven Framework for Predicting Hotel Booking Cancellations using Machine
 
 ## Overview
 
-This project implements a complete machine learning pipeline for predicting hotel booking cancellations. It includes multiple models (Logistic Regression, Random Forest, XGBoost, and PyTorch MLP), MLflow experiment tracking, and a FastAPI-based prediction service containerized with Docker for deployment to Amazon ECR.
+This project implements a complete machine learning pipeline for predicting hotel booking cancellations. It includes multiple models (Logistic Regression, Random Forest, XGBoost, and PyTorch MLP), MLflow experiment tracking, and a FastAPI-based prediction service. Deployment is now Hugging Face Space–focused (all former cloud-specific pathways removed).
 
 ## Project Structure
 
@@ -35,7 +35,7 @@ hotel-cancellation-prediction/
 ├── Dockerfile           # Docker container configuration
 ├── docker-compose.yml   # Docker Compose for local deployment
 ├── requirements.txt     # Python dependencies (enhanced for academic research)
-├── DEPLOYMENT.md        # AWS ECR deployment guide
+├── DEPLOYMENT.md        # Hugging Face Space deployment guide
 ├── QUICKSTART.md        # Quick start guide
 ├── EDA.md              # Comprehensive EDA methodology (1,624 lines)
 ├── preprocessing.md     # Preprocessing strategies guide (1,445 lines)
@@ -98,7 +98,7 @@ This project implements a **hybrid approach** combining interactive analysis wit
 
 - Optimized Docker image for production deployment
 - Health checks included
-- Ready for Amazon ECR deployment
+- Ready for containerized deployment (Docker / Hugging Face Space)
 
 ## Installation
 
@@ -176,8 +176,7 @@ make mlflow               # Launch MLflow UI
 make export-latex         # (If added) run LaTeX export script
 make artifacts-status     # List artifact files
 make docker-build         # Build Docker image (IMAGE_TAG=git SHA)
-make docker-push REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com
-make docker-release REGISTRY=...  # Build + push (sha + latest)
+make docker-release                # Build + tag local image (sha + latest)
 ```
 
 ### Fairness & LaTeX Utilities
@@ -299,37 +298,9 @@ docker build -t hotel-cancellation-prediction .
 docker run -p 8000:8000 hotel-cancellation-prediction
 ```
 
-### Deploying to Amazon ECR
+### Deploying the Image
 
-For detailed instructions on deploying to AWS ECR and running on ECS, EKS, or App Runner, see [DEPLOYMENT.md](DEPLOYMENT.md).
-
-Quick start:
-
-1. Authenticate Docker to ECR:
-
-```bash
-aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
-```
-
-2. Create ECR repository (if not exists):
-
-```bash
-aws ecr create-repository --repository-name hotel-cancellation-prediction --region <region>
-```
-
-3. Tag the image:
-
-```bash
-docker tag hotel-cancellation-prediction:latest <account-id>.dkr.ecr.<region>.amazonaws.com/hotel-cancellation-prediction:latest
-```
-
-4. Push to ECR:
-
-```bash
-docker push <account-id>.dkr.ecr.<region>.amazonaws.com/hotel-cancellation-prediction:latest
-```
-
-5. Deploy to ECS, EKS, or other AWS services using the ECR image.
+You can run the container anywhere Docker is supported or publish a lightweight inference demo as a Hugging Face Space (see `DEPLOYMENT.md`).
 
 ## Input Features
 
@@ -504,6 +475,127 @@ The `/model/interpretability` endpoint provides: champion metadata, top global f
 
 ---
 
+## Hugging Face Space Deployment (FastAPI)
+
+Deploy the existing FastAPI service as a Hugging Face Space for a lightweight, reproducible demo.
+
+### Approaches
+
+1. Minimal inference-only (recommended): copy `main.py`, the `app/` package and a pruned `requirements.txt`.
+2. Full repo: copy everything (larger image, includes notebooks & MLflow support).
+
+### 1. Create / Clone the Space
+
+```bash
+git clone https://huggingface.co/spaces/j2damax/boking-cancelation-api
+cd boking-cancelation-api
+```
+
+### 2. Copy Runtime Files
+
+From your project root (sibling directory):
+```bash
+cp ../hotel-cancellation-prediction/main.py .
+cp -R ../hotel-cancellation-prediction/app ./app
+cp ../hotel-cancellation-prediction/requirements.txt .
+```
+
+Optional: prune `requirements.txt` to only what inference needs:
+```
+fastapi
+uvicorn[standard]
+pydantic
+scikit-learn==1.7.2
+xgboost
+pandas
+numpy
+joblib
+huggingface_hub
+python-dotenv
+```
+Add `torch` only if a future champion uses the PyTorch MLP.
+
+### 3. (Optional) Dockerfile
+
+If using the Docker Space SDK, create a `Dockerfile`:
+```dockerfile
+FROM python:3.10-slim
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
+COPY main.py ./
+COPY app ./app
+EXPOSE 7860
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+```
+Hugging Face expects the app to listen on port 7860.
+
+If not using Docker (plain FastAPI Space), just ensure `main.py` + `requirements.txt` exist at the root.
+
+### 4. Configure Environment Variables
+
+In the Space settings (Variables & secrets):
+
+```
+HF_MODEL_REPO=j2damax/hotel-cancel-champion   # Required: model artifacts repo
+# Optional overrides
+DECISION_THRESHOLD=0.42                       # Force decision threshold (else champion_meta / default 0.5)
+ALLOW_START_WITHOUT_MODEL=true                # (Dev) start even if model download fails
+```
+
+Loading order: local committed artifacts (if present) → Hugging Face Hub (`HF_MODEL_REPO`).
+
+### 5. Commit & Push
+
+```bash
+git add .
+git commit -m "Deploy FastAPI hotel cancellation API"
+git push
+```
+
+Watch the Space build logs; first startup will download artifacts via `snapshot_download`.
+
+### 6. Test Endpoints
+
+```bash
+curl -s https://huggingface.co/spaces/j2damax/boking-cancelation-api/health
+curl -s -X POST https://huggingface.co/spaces/j2damax/boking-cancelation-api/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"lead_time":30,"arrival_month":7,"adults":2,"children":0,"adr":120.0}'
+```
+
+Depending on Space type, you may need `/proxy/` in the path for Docker Spaces (e.g. `/proxy/health`).
+
+### 7. Updating the Model
+
+1. Retrain: `python scripts/train.py`
+2. Push new artifacts: `python scripts/push_to_hf.py`
+3. (If threshold changed) set `DECISION_THRESHOLD` or let champion meta drive it.
+4. (Optional) Restart Space or push a dummy commit to trigger refresh.
+
+### 8. Troubleshooting Cheat Sheet
+
+| Symptom | Cause | Resolution |
+|---------|-------|-----------|
+| 503 model_not_loaded | `HF_MODEL_REPO` unset | Add env var in Space settings |
+| InconsistentVersionWarning | Artifact sklearn > runtime | Pin `scikit-learn==1.7.2` |
+| 500 Preprocessor transform failed | Altered `_prepare` logic | Restore `app/routes.py` version |
+| 422 validation error | Missing required minimal fields | Provide: lead_time, arrival_month, adults, adr |
+| Slow first request | Cold start + artifact download | Wait; subsequent faster |
+
+### 9. Security Notes
+
+Do not commit secrets. Use the Space secrets UI (or your platform's secret manager) for any sensitive variables (e.g., API keys). If any historical cloud credentials were ever committed, rotate/revoke them immediately. Model artifacts on the Hub are public unless the repo is private.
+
+### 10. Removing Research Bloat
+
+For the smallest image: drop notebooks, `mlruns/`, and heavy optional libs from `requirements.txt` (keep only runtime stack above). The loader does not require MLflow.
+
+---
+
+This Space deployment path is the canonical deployment approach for public demos and academic reproducibility.
+
 ## Environment Configuration
 
 The application supports environment-based configuration through `.env` files:
@@ -530,7 +622,7 @@ cp .env.example .env
 - `MODEL_PATH`: Directory for saved models (default: models/)
 - `LOG_LEVEL`: Logging level (default: INFO)
 
-For Hugging Face deployment specifics see `DEPLOYMENT.md`. For a minimal AWS (S3 + ECR/ECS) reference see `DEPLOYMENT_AWS.md` which documents bucket/repo naming, IAM actions, and runtime model fetch environment variables.
+For Hugging Face deployment specifics see `DEPLOYMENT.md`.
 
 ### Production Configuration
 
@@ -540,11 +632,6 @@ For production deployments, set secure values in `.env`:
 # Security
 API_KEY=your-secret-api-key
 JWT_SECRET=your-jwt-secret
-
-# AWS Configuration
-AWS_REGION=us-east-1
-AWS_ACCOUNT_ID=123456789012
-ECR_REPOSITORY_NAME=hotel-cancellation-prediction
 
 # Performance
 MAX_WORKERS=8
@@ -636,71 +723,5 @@ Use this before producing final academic or deployment results:
 - Automated LaTeX export of metrics & importance tables
 - Optional calibration & fairness diagnostics modules
 
-## SageMaker Deployment (MVP Alternative to ECS)
-
-This project supports direct deployment as an AWS SageMaker endpoint using the emitted champion artifacts without running a custom inference server on ECS.
-
-### Artifacts Packaged
-Included in `model.tar.gz`:
-- `champion_model.pkl`
-- `preprocessor.pkl`
-- `champion_meta.json`
-- (Optional) `feature_importance.json`, `shap_values_sample.json`, `feature_name_map.json`
-- `code/inference.py` (custom handlers)
-- `code/requirements.txt` (pinned inference deps)
-
-### Packaging
-```
-bash sagemaker/pack_model.sh --models-dir models --artifacts-dir artifacts --output model.tar.gz
-aws s3 cp model.tar.gz s3://<artifact-bucket>/deploy/model.tar.gz
-```
-
-### Create Model & Serverless Endpoint
-```
-REGION=<region>
-IMAGE=763104351884.dkr.ecr.${REGION}.amazonaws.com/pytorch-inference:2.2.0-cpu-py310-ubuntu20.04-sagemaker
-aws sagemaker create-model \
-  --model-name hotel-cancel-champion \
-  --primary-container Image=${IMAGE},ModelDataUrl=s3://<artifact-bucket>/deploy/model.tar.gz \
-  --execution-role-arn arn:aws:iam::<account>:role/SageMakerExecutionRole
-
-aws sagemaker create-endpoint-config \
-  --endpoint-config-name hotel-cancel-serverless \
-  --production-variants '[{"VariantName":"AllTraffic","ModelName":"hotel-cancel-champion","ServerlessConfig":{"MemorySizeInMB":4096,"MaxConcurrency":5}}]'
-
-aws sagemaker create-endpoint \
-  --endpoint-name hotel-cancel \
-  --endpoint-config-name hotel-cancel-serverless
-```
-
-### Invoke
-```
-aws sagemaker-runtime invoke-endpoint \
-  --endpoint-name hotel-cancel \
-  --body '{"lead_time":120,"arrival_month":7,"stays_weekend_nights":2,"stays_week_nights":3,"adults":2,"children":1,"is_repeated_guest":0,"previous_cancellations":0,"booking_changes":1,"adr":95.5,"required_car_parking_spaces":0,"total_of_special_requests":2}' \
-  --content-type application/json response.json
-cat response.json
-```
-
-### Threshold Resolution Order
-1. ENV `DECISION_THRESHOLD` (if set)
-2. `champion_meta.json` (`decision_threshold`)
-3. Default 0.5
-
-### Update Flow
-1. Retrain & generate new artifacts
-2. Repackage → upload new `model.tar.gz`
-3. Create new model + (optional new endpoint config) → update endpoint
-
-### Clean Up
-```
-aws sagemaker delete-endpoint --endpoint-name hotel-cancel
-aws sagemaker delete-endpoint-config --endpoint-config-name hotel-cancel-serverless
-aws sagemaker delete-model --model-name hotel-cancel-champion
-```
-
-### Academic Rationale
-Using SageMaker abstracts infrastructure (autoscaling, secure HTTPS, artifact materialization) allowing focus on reproducibility, interpretability artifacts, and threshold tuning—aligning with coursework objectives.
-
 ---
-Updated: 2025-10-05
+Updated: 2025-10-05 (Hugging Face Space is the sole documented deployment target)
