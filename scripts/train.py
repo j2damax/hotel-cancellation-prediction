@@ -29,6 +29,31 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+import platform
+
+
+def collect_library_versions():
+    """Collect key library versions for provenance tracking.
+
+    Returns dict of library -> version. Missing libraries are skipped.
+    """
+    versions = {}
+    versions['python'] = platform.python_version()
+    def _safe(name, alias=None):
+        try:
+            mod = __import__(name) if alias is None else __import__(alias)
+            versions[name] = getattr(mod, '__version__', 'unknown')
+        except Exception:
+            pass
+    _safe('pandas')
+    _safe('numpy')
+    _safe('sklearn')  # scikit-learn
+    _safe('xgboost')
+    _safe('torch')
+    _safe('mlflow')
+    _safe('shap')
+    _safe('fastapi')
+    return versions
 
 
 class MLPClassifier(nn.Module):
@@ -810,6 +835,7 @@ def main():
                 'timestamp': pd.Timestamp.utcnow().isoformat(),
                 'notes': 'Model will be (re)trained on training split below; final persisted champion artifact occurs after training.'
             }
+            champion_meta['library_versions'] = collect_library_versions()
             with open('artifacts/champion_meta.json', 'w') as f:
                 json.dump(champion_meta, f, indent=2)
             print("[CV] Champion metadata written -> artifacts/champion_meta.json")
@@ -934,6 +960,9 @@ def main():
                     champion_meta['persisted_path'] = champion_path
                     champion_meta['holdout_metrics'] = holdout_metrics
                     champion_meta['holdout_timestamp'] = pd.Timestamp.utcnow().isoformat()
+                    # Ensure library versions present even if champion_meta came from prior run
+                    if 'library_versions' not in champion_meta:
+                        champion_meta['library_versions'] = collect_library_versions()
                     with open(champion_meta_path, 'w') as f:
                         json.dump(champion_meta, f, indent=2)
                     print(f"[Champion] Persisted champion model -> {champion_path}")
@@ -964,6 +993,8 @@ def main():
             champion_meta['decision_threshold'] = best_threshold
             champion_meta['decision_threshold_metrics'] = best_thr_metrics
             champion_meta['diagnostics_generated'] = pd.Timestamp.utcnow().isoformat()
+            if 'library_versions' not in champion_meta:
+                champion_meta['library_versions'] = collect_library_versions()
             with open('artifacts/champion_meta.json', 'w') as f:
                 json.dump(champion_meta, f, indent=2)
             print(f"[Diagnostics] Generated champion diagnostics. Optimal F1 threshold={best_threshold:.2f} (F1={best_thr_metrics['f1_score']:.4f})")
@@ -984,6 +1015,8 @@ def main():
             if shap_success:
                 champion_meta['shap_generated'] = True
                 champion_meta['shap_timestamp'] = pd.Timestamp.utcnow().isoformat()
+                if 'library_versions' not in champion_meta:
+                    champion_meta['library_versions'] = collect_library_versions()
                 with open('artifacts/champion_meta.json', 'w') as f:
                     json.dump(champion_meta, f, indent=2)
                 print("[SHAP] Global & local SHAP artifacts generated.")

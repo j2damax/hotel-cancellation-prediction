@@ -151,3 +151,20 @@ def resolve_threshold() -> tuple[float, str]:
         except ValueError:
             pass
     return 0.5, 'default'
+
+
+def load_model_and_preprocessor():
+    """Convenience helper to ensure artifacts are loaded and return them with minimal metadata.
+
+    Returns (model, preprocessor, metadata_dict)
+    metadata_dict contains keys: version, threshold, threshold_source
+    """
+    if model is None or preprocessor is None:
+        load_model()
+    thr, source = resolve_threshold()
+    meta = {
+        'version': model_version,
+        'threshold': thr,
+        'threshold_source': source
+    }
+    return model, preprocessor, meta
