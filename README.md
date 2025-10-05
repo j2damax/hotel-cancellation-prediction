@@ -6,6 +6,41 @@ A machine learning pipeline for predicting hotel booking cancellations with mult
 
 ```
 hotel-cancellation-prediction/
+├── data/
+│   ├── raw/              # Raw hotel booking datasets
+│   ├── processed/        # Cleaned and preprocessed data
+│   └── features/         # Feature-engineered datasets ready for modeling
+├── notebooks/            # Jupyter notebooks for interactive analysis
+│   ├── 01_eda.ipynb                    # Exploratory Data Analysis
+│   ├── 02_preprocessing_analysis.ipynb # Preprocessing strategy comparison
+│   ├── 03_feature_engineering.ipynb   # Feature engineering experiments
+│   └── 04_model_evaluation.ipynb      # Model evaluation and SHAP analysis
+├── scripts/              # Production-ready Python scripts
+│   ├── train.py                # Training script for all models
+│   ├── preprocessing.py        # Data preprocessing pipeline
+│   ├── feature_engineering.py  # Feature engineering pipeline
+│   ├── model_evaluation.py     # Model evaluation and comparison
+│   ├── push_to_hf.py           # Upload model to Hugging Face Hub
+│   ├── deploy_to_hf_space.py   # Deploy app to Hugging Face Spaces
+│   └── test_api.py            # API testing client
+├── src/                  # Core source code modules
+├── models/              # Saved models and preprocessing artifacts
+├── results/             # Evaluation results and reports
+├── mlruns/              # MLflow experiment tracking data
+├── .github/             # GitHub workflows and AI agent instructions
+│   └── copilot-instructions.md # Comprehensive AI agent guidance
+├── main.py              # FastAPI application
+├── Dockerfile           # Docker container configuration
+├── docker-compose.yml   # Docker Compose for local deployment
+├── requirements.txt     # Python dependencies (enhanced for academic research)
+├── HUGGINGFACE_DEPLOYMENT.md # Hugging Face Space deployment guide  
+├── DEPLOYMENT.md        # Legacy deployment documentation
+├── QUICKSTART.md        # Quick start guide
+├── EDA.md              # Comprehensive EDA methodology (1,624 lines)
+├── preprocessing.md     # Preprocessing strategies guide (1,445 lines)
+├── features.md         # Feature engineering guide (1,653 lines)
+├── .gitignore          # Git ignore rules
+└── README.md           # This file
 ├── data/                 # Raw, processed, and feature-engineered datasets
 ├── notebooks/            # Jupyter notebooks for analysis
 ├── scripts/              # Production Python scripts
