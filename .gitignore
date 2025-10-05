@@ -33,6 +33,7 @@ mlartifacts/
 models/*.pkl
 models/*.pth
 models/*.joblib
+models/remote/
 
 # Data files (optional - uncomment if you want to ignore data)
 # data/raw/*
