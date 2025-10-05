@@ -164,6 +164,27 @@ mlflow ui
 
 Then open http://localhost:5000 in your browser.
 
+### Makefile Convenience
+
+Common tasks (see `Makefile`):
+
+```
+make train                # Full CV training
+make fast-train ROWS=800  # Smoke test limited rows
+make api                  # Run API locally
+make mlflow               # Launch MLflow UI
+make export-latex         # (If added) run LaTeX export script
+make artifacts-status     # List artifact files
+make docker-build         # Build Docker image (IMAGE_TAG=git SHA)
+make docker-push REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com
+make docker-release REGISTRY=...  # Build + push (sha + latest)
+```
+
+### Fairness & LaTeX Utilities
+
+- `scripts/fairness_analysis.py` – exploratory subgroup metrics
+- `scripts/export_latex.py` – generate LaTeX tables into `report/latex/`
+
 ### Running the API
 
 Start the FastAPI server:
@@ -338,6 +359,32 @@ After training, you can compare model performance in the MLflow UI. Metrics trac
 - Recall
 - F1 Score
 - ROC AUC
+
+### Current Champion (Most Recent Full Run)
+
+The latest full-data training run (timestamp 2025-10-05) selected **XGBoost** as champion via 5-fold stratified CV (primary metric F1, tie-break ROC-AUC).
+
+Cross-Validation (mean ± std):
+
+- Accuracy: 0.8612 ± 0.0016
+- Precision: 0.8386 ± 0.0024
+- Recall: 0.7743 ± 0.0051
+- F1: 0.8052 ± 0.0028
+- ROC-AUC: 0.9376 ± 0.0010
+
+Holdout Metrics:
+
+- Accuracy: 0.8614
+- Precision: 0.8417
+- Recall: 0.7707
+- F1: 0.8047
+- ROC-AUC: 0.9384
+
+Optimal Operating Threshold (F1-oriented): 0.35 → Precision 0.7664 / Recall 0.8620 / F1 0.8114
+
+Artifacts: see `artifacts/champion_meta.json` and `artifacts/cv_metrics.json`.
+
+> NOTE: Champion is re-evaluated each training run; values above are point-in-time and will update after subsequent executions.
 
 ## Cross-Validation & Champion Selection
 

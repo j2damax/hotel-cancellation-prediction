@@ -35,3 +35,12 @@ Future (Optional Enhancements):
 - Automated LaTeX export of metrics & importance tables
 
 Status: READY for full-data training run & deployment experimentation.
+
+Current Champion Snapshot (2025-10-05):
+- Model: XGBoost
+- CV F1 (µ±σ): 0.8052 ± 0.0028
+- CV ROC-AUC (µ±σ): 0.9376 ± 0.0010
+- Holdout F1: 0.8047 | Holdout ROC-AUC: 0.9384
+- Threshold (F1-optimal): 0.35 (Precision 0.7664 / Recall 0.8620 / F1 0.8114)
+
+Artifacts Source: `artifacts/champion_meta.json`, `artifacts/cv_metrics.json` (regenerate via `make train`).

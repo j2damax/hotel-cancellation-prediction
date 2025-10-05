@@ -1,0 +1,5 @@
+{
+  "error": "feature_shape_mismatch",
+  "message": "Feature shape mismatch, expected: 41, got 28",
+  "note": "Full encoded feature space not reconstructed; run full pipeline-based fairness later."
+}

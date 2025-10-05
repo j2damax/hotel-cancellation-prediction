@@ -1,0 +1,27 @@
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Rank & Feature & Mean $|$SHAP$|$ \\
+\midrule
+1 & deposit\_type & 1.004748 \
+2 & country\_\_te & 0.851627 \
+3 & market\_segment & 0.435410 \
+4 & total\_of\_special\_requests & 0.421005 \
+5 & lead\_time & 0.414569 \
+6 & required\_car\_parking\_spaces & 0.402005 \
+7 & assigned\_room\_type & 0.329202 \
+8 & customer\_type\_target\_encoded & 0.250616 \
+9 & reserved\_room\_type & 0.237145 \
+10 & previous\_cancellations & 0.215449 \
+11 & arrival\_date\_year & 0.201870 \
+12 & adr & 0.172085 \
+13 & booking\_changes & 0.137079 \
+14 & market\_segment\_target\_encoded & 0.120963 \
+15 & hotel & 0.080434 \
+\bottomrule
+\end{tabular}
+\caption{Top feature attributions by mean absolute SHAP value (top 15).}
+\label{tab:feature-importance}
+\end{table}

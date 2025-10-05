@@ -8,10 +8,19 @@ CV ?= 5
 ROWS ?=
 CATEGORICAL ?= target
 
+# Docker / Image settings
+REGISTRY ?=
+IMAGE_NAME ?= hotel-cancellation-prediction
+IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+IMAGE_FULL := $(if $(REGISTRY),$(REGISTRY)/$(IMAGE_NAME),$(IMAGE_NAME))
+
+# Composite tags to push (sha + latest)
+PUSH_TAGS ?= $(IMAGE_TAG) latest
+
 # If ROWS provided, add --limit-rows flag
 LIMIT_ROWS_ARG := $(if $(ROWS),--limit-rows $(ROWS),)
 
-.PHONY: help train fast-train api mlflow test clean-artifacts artifacts-status interpretability
+.PHONY: help train fast-train api mlflow test clean-artifacts artifacts-status interpretability docker-build docker-push docker-release docker-run
 
 help:
 	@echo "Available targets:"
@@ -23,6 +32,10 @@ help:
 	@echo "  make interpretability- Curl interpretability endpoint (API must be running)"
 	@echo "  make artifacts-status- List key artifact files"
 	@echo "  make clean-artifacts - Remove generated artifact files (careful)"
+	@echo "  make docker-build     - Build Docker image (REGISTRY=<registry>)"
+	@echo "  make docker-push      - Push image with tags (REGISTRY=<registry>)"
+	@echo "  make docker-release   - Build + push (convenience)"
+	@echo "  make docker-run       - Run local container exposing API port"
 
 train:
 	$(PYTHON) scripts/train.py --cv-folds $(CV) --categorical-strategy $(CATEGORICAL) $(LIMIT_ROWS_ARG)
@@ -36,6 +49,22 @@ api:
 
 mlflow:
 	mlflow ui --port $(MLFLOW_PORT)
+
+docker-build:
+	docker build -t $(IMAGE_FULL):$(IMAGE_TAG) .
+	@if echo "$(PUSH_TAGS)" | grep -qw latest; then docker tag $(IMAGE_FULL):$(IMAGE_TAG) $(IMAGE_FULL):latest; fi
+
+docker-push: docker-build
+	@for t in $(PUSH_TAGS); do \
+	  echo "Pushing $(IMAGE_FULL):$$t"; \
+	  docker push $(IMAGE_FULL):$$t; \
+	done
+
+docker-release: docker-push
+	@echo "Release complete: $(IMAGE_FULL):$(IMAGE_TAG) + extra tags ($(PUSH_TAGS))"
+
+docker-run:
+	docker run --rm -p $(PORT):8000 $(IMAGE_FULL):$(IMAGE_TAG)
 
 interpretability:
 	curl -s http://localhost:$(PORT)/model/interpretability | head -n 40

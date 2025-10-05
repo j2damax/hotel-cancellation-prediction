@@ -54,10 +54,6 @@ class MLPClassifier(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-
-## NOTE: generate_sample_data removed. Training now requires engineered dataset to promote reproducibility and parity with API inference.
-
-
 def evaluate_model(y_true, y_pred, y_pred_proba=None):
     """Calculate evaluation metrics."""
     metrics = {
