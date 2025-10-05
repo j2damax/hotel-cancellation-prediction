@@ -24,6 +24,8 @@ hotel-cancellation-prediction/
 │   ├── preprocessing.py        # Data preprocessing pipeline
 │   ├── feature_engineering.py  # Feature engineering pipeline
 │   ├── model_evaluation.py     # Model evaluation and comparison
+│   ├── push_to_hf.py           # Upload model to Hugging Face Hub
+│   ├── deploy_to_hf_space.py   # Deploy app to Hugging Face Spaces
 │   └── test_api.py            # API testing client
 ├── src/                  # Core source code modules
 ├── models/              # Saved models and preprocessing artifacts
@@ -35,7 +37,8 @@ hotel-cancellation-prediction/
 ├── Dockerfile           # Docker container configuration
 ├── docker-compose.yml   # Docker Compose for local deployment
 ├── requirements.txt     # Python dependencies (enhanced for academic research)
-├── DEPLOYMENT.md        # Hugging Face Space deployment guide
+├── HUGGINGFACE_DEPLOYMENT.md # Hugging Face Space deployment guide  
+├── DEPLOYMENT.md        # Legacy deployment documentation
 ├── QUICKSTART.md        # Quick start guide
 ├── EDA.md              # Comprehensive EDA methodology (1,624 lines)
 ├── preprocessing.md     # Preprocessing strategies guide (1,445 lines)
@@ -173,10 +176,10 @@ make train                # Full CV training
 make fast-train ROWS=800  # Smoke test limited rows
 make api                  # Run API locally
 make mlflow               # Launch MLflow UI
-make export-latex         # (If added) run LaTeX export script
+make deploy-hf-space      # Deploy to Hugging Face Spaces
 make artifacts-status     # List artifact files
 make docker-build         # Build Docker image (IMAGE_TAG=git SHA)
-make docker-release                # Build + tag local image (sha + latest)
+make docker-release       # Build + tag local image (sha + latest)
 ```
 
 ### Fairness & LaTeX Utilities
@@ -477,21 +480,41 @@ The `/model/interpretability` endpoint provides: champion metadata, top global f
 
 ## Hugging Face Space Deployment (FastAPI)
 
-Deploy the existing FastAPI service as a Hugging Face Space for a lightweight, reproducible demo.
+Deploy the FastAPI application to Hugging Face Spaces for a lightweight, reproducible demo.
 
-### Approaches
+### Quick Deploy (Automated)
 
-1. Minimal inference-only (recommended): copy `main.py`, the `app/` package and a pruned `requirements.txt`.
-2. Full repo: copy everything (larger image, includes notebooks & MLflow support).
+Use the automated deployment script that handles everything:
 
-### 1. Create / Clone the Space
+```bash
+# Deploy to default space (j2damax/boking-cancelation-api)
+make deploy-hf-space
+
+# Or use the script directly
+python scripts/deploy_to_hf_space.py --space-id j2damax/boking-cancelation-api
+```
+
+The script automatically:
+- ✅ Clears the space cache (force update)
+- ✅ Packages app code, models, and artifacts
+- ✅ Creates Space-compatible Dockerfile and requirements.txt
+- ✅ Generates comprehensive README for the Space
+- ✅ Uploads everything to Hugging Face
+
+**See [`HUGGINGFACE_DEPLOYMENT.md`](HUGGINGFACE_DEPLOYMENT.md) for detailed deployment guide.**
+
+### Manual Deployment (Alternative)
+
+If you prefer manual deployment:
+
+#### 1. Create / Clone the Space
 
 ```bash
 git clone https://huggingface.co/spaces/j2damax/boking-cancelation-api
 cd boking-cancelation-api
 ```
 
-### 2. Copy Runtime Files
+#### 2. Copy Runtime Files
 
 From your project root (sibling directory):
 ```bash
@@ -513,9 +536,8 @@ joblib
 huggingface_hub
 python-dotenv
 ```
-Add `torch` only if a future champion uses the PyTorch MLP.
 
-### 3. (Optional) Dockerfile
+#### 3. Create Dockerfile
 
 If using the Docker Space SDK, create a `Dockerfile`:
 ```dockerfile
@@ -531,22 +553,20 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
 ```
 Hugging Face expects the app to listen on port 7860.
 
-If not using Docker (plain FastAPI Space), just ensure `main.py` + `requirements.txt` exist at the root.
+If not using Docker (plain FastAPI Space), ensure `main.py` + `requirements.txt` exist at the root.
 
-### 4. Configure Environment Variables
+#### 4. Configure Environment Variables (Optional)
 
-In the Space settings (Variables & secrets):
+In the Space settings (Variables & secrets), you can optionally set:
 
 ```
-HF_MODEL_REPO=j2damax/hotel-cancel-champion   # Required: model artifacts repo
-# Optional overrides
-DECISION_THRESHOLD=0.42                       # Force decision threshold (else champion_meta / default 0.5)
-ALLOW_START_WITHOUT_MODEL=true                # (Dev) start even if model download fails
+HF_MODEL_REPO=j2damax/hotel-cancel-champion   # Optional: load model from another HF repo
+DECISION_THRESHOLD=0.42                       # Optional: override decision threshold
 ```
 
-Loading order: local committed artifacts (if present) → Hugging Face Hub (`HF_MODEL_REPO`).
+**Note:** The automated script includes model files directly in the Space, so `HF_MODEL_REPO` is not required.
 
-### 5. Commit & Push
+#### 5. Commit & Push
 
 ```bash
 git add .
@@ -554,9 +574,11 @@ git commit -m "Deploy FastAPI hotel cancellation API"
 git push
 ```
 
-Watch the Space build logs; first startup will download artifacts via `snapshot_download`.
+Watch the Space build logs.
 
-### 6. Test Endpoints
+### Testing the Deployed Space
+
+Once deployed (automated or manual), test the endpoints:
 
 ```bash
 curl -s https://huggingface.co/spaces/j2damax/boking-cancelation-api/health
@@ -565,16 +587,25 @@ curl -s -X POST https://huggingface.co/spaces/j2damax/boking-cancelation-api/pre
   -d '{"lead_time":30,"arrival_month":7,"adults":2,"children":0,"adr":120.0}'
 ```
 
-Depending on Space type, you may need `/proxy/` in the path for Docker Spaces (e.g. `/proxy/health`).
+Depending on Space type, you may need `/proxy/` in the path for Docker Spaces.
 
-### 7. Updating the Model
+### Updating the Deployed Model
 
-1. Retrain: `python scripts/train.py`
-2. Push new artifacts: `python scripts/push_to_hf.py`
-3. (If threshold changed) set `DECISION_THRESHOLD` or let champion meta drive it.
-4. (Optional) Restart Space or push a dummy commit to trigger refresh.
+To deploy updates after retraining:
 
-### 8. Troubleshooting Cheat Sheet
+```bash
+# Retrain the model
+python scripts/train.py
+
+# Deploy the updated model to the Space
+make deploy-hf-space
+```
+
+For more details, see [`HUGGINGFACE_DEPLOYMENT.md`](HUGGINGFACE_DEPLOYMENT.md).
+
+---
+
+### Troubleshooting Deployment
 
 | Symptom | Cause | Resolution |
 |---------|-------|-----------|
