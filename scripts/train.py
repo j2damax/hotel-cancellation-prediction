@@ -550,10 +550,17 @@ def generate_champion_diagnostics(model_name: str, model_obj, X_test: pd.DataFra
 
     # ROC curve
     fpr, tpr, roc_thresholds = roc_curve(y_test, probabilities)
+    # Some sklearn versions include an initial inf threshold; sanitize for strict JSON and downstream tools.
+    roc_thresh_list = []
+    for val in roc_thresholds.tolist():
+        if isinstance(val, (float, int)) and (np.isinf(val) or np.isnan(val)):
+            roc_thresh_list.append(None)
+        else:
+            roc_thresh_list.append(val)
     roc_payload = {
         'fpr': fpr.tolist(),
         'tpr': tpr.tolist(),
-        'thresholds': roc_thresholds.tolist()
+        'thresholds': roc_thresh_list
     }
     with open(os.path.join(artifacts_dir, 'roc_curve.json'), 'w') as f:
         json.dump(roc_payload, f, indent=2)
