@@ -25,7 +25,7 @@ COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY src/ ./src/
 # (Optional) artifacts directory placeholder (left empty at build)
-RUN mkdir -p artifacts
+RUN mkdir -p artifacts models
 
 # Create non-root user for security
 RUN useradd -m appuser && chown -R appuser:appuser /app
