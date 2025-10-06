@@ -1,10 +1,6 @@
 # Hotel Cancellation Prediction
 
-A Data-Driven Framework for Predicting Hotel Booking Cancellations using Machine Learning
-
-## Overview
-
-This project implements a complete machine learning pipeline for predicting hotel booking cancellations. It includes multiple models (Logistic Regression, Random Forest, XGBoost, and PyTorch MLP), MLflow experiment tracking, and a FastAPI-based prediction service containerized with Docker for deployment to Amazon ECR.
+A machine learning pipeline for predicting hotel booking cancellations with multiple models, MLflow tracking, and FastAPI REST API.
 
 ## Project Structure
 
@@ -24,6 +20,8 @@ hotel-cancellation-prediction/
 │   ├── preprocessing.py        # Data preprocessing pipeline
 │   ├── feature_engineering.py  # Feature engineering pipeline
 │   ├── model_evaluation.py     # Model evaluation and comparison
+│   ├── push_to_hf.py           # Upload model to Hugging Face Hub
+│   ├── deploy_to_hf_space.py   # Deploy app to Hugging Face Spaces
 │   └── test_api.py            # API testing client
 ├── src/                  # Core source code modules
 ├── models/              # Saved models and preprocessing artifacts
@@ -35,189 +33,104 @@ hotel-cancellation-prediction/
 ├── Dockerfile           # Docker container configuration
 ├── docker-compose.yml   # Docker Compose for local deployment
 ├── requirements.txt     # Python dependencies (enhanced for academic research)
-├── DEPLOYMENT.md        # AWS ECR deployment guide
+├── HUGGINGFACE_DEPLOYMENT.md # Hugging Face Space deployment guide  
+├── DEPLOYMENT.md        # Legacy deployment documentation
 ├── QUICKSTART.md        # Quick start guide
 ├── EDA.md              # Comprehensive EDA methodology (1,624 lines)
 ├── preprocessing.md     # Preprocessing strategies guide (1,445 lines)
 ├── features.md         # Feature engineering guide (1,653 lines)
 ├── .gitignore          # Git ignore rules
 └── README.md           # This file
+├── data/                 # Raw, processed, and feature-engineered datasets
+├── notebooks/            # Jupyter notebooks for analysis
+├── scripts/              # Production Python scripts
+│   ├── train.py          # Model training with cross-validation
+│   ├── export_latex.py   # LaTeX table generation
+│   └── test_api.py       # API testing
+├── app/                  # FastAPI application modules
+├── models/               # Saved models and artifacts
+├── artifacts/            # Training artifacts and metrics
+├── mlruns/               # MLflow experiment tracking
+├── main.py               # FastAPI entry point
+├── Dockerfile            # Container configuration
+└── requirements.txt      # Python dependencies
 ```
 
 ## Features
 
-### Hybrid Architecture: Notebooks + Production Scripts
+- **Multiple ML Models**: Logistic Regression, Random Forest, XGBoost, PyTorch MLP
+- **Cross-Validation**: Stratified K-fold with automatic champion selection (F1 score primary metric)
+- **MLflow Tracking**: Experiment logging and model versioning
+- **REST API**: FastAPI with `/predict`, `/predict/batch`, `/health`, and `/model/interpretability` endpoints
+- **SHAP Interpretability**: Model explainability with global and local feature importance
+- **Docker Support**: Containerized deployment ready
+- **Hugging Face Integration**: Deploy as a Space with model artifact loading from Hub
 
-This project implements a **hybrid approach** combining interactive analysis with production-ready pipelines:
+## Quick Start
 
-**📓 Jupyter Notebooks** (for research and analysis):
-- `01_eda.ipynb` - Interactive exploratory data analysis with visualizations
-- `02_preprocessing_analysis.ipynb` - Preprocessing strategy experimentation
-- `03_feature_engineering.ipynb` - Feature engineering with effectiveness testing
-- `04_model_evaluation.ipynb` - Model comparison with SHAP interpretability
-
-**🐍 Python Scripts** (for production deployment):
-- `preprocessing.py` - Automated data preprocessing pipeline
-- `feature_engineering.py` - Production feature engineering with cross-validation
-- `model_evaluation.py` - Comprehensive model evaluation with statistical testing
-- `train.py` - Complete training pipeline for deployment
-
-### Academic Research Framework
-
-- **NIB 7072 Coursework Compliance**: Rigorous academic standards with statistical significance testing
-- **Sri Lankan Tourism Focus**: Domain-specific features and business impact analysis  
-- **5-Fold Cross-Validation**: Stratified sampling with performance confidence intervals
-- **SHAP Interpretability**: Model explainability for actionable business insights
-- **Comprehensive Documentation**: 4,700+ lines of methodology documentation
-
-### Machine Learning Models
-
-- **Logistic Regression**: Baseline linear model with L1/L2 regularization
-- **Random Forest**: Ensemble tree-based model with optimized hyperparameters
-- **XGBoost**: Gradient boosting model (historically strong performer in internal experiments)
-- **PyTorch MLP**: Deep learning neural network with dropout and batch normalization
-
-> Champion model is now selected dynamically per training run using cross-validation (F1 primary, ROC-AUC tie-break). Any previously hard-coded champion claims (e.g., a fixed XGBoost score) should be treated as historical examples only.
-
-### MLflow Integration
-
-- Experiment tracking for all models with Optuna hyperparameter optimization
-- Automatic logging of parameters, metrics, and model artifacts
-- Model comparison and versioning with statistical significance testing
-- Easy model registry integration for production deployment
-
-### FastAPI REST API
-
-- `/predict` - Single prediction endpoint with Pydantic validation
-- `/predict/batch` - Batch prediction endpoint for bulk processing
-- `/health` - Health check endpoint with model availability verification
-- `/model/interpretability` - Serve SHAP global + local explanation metadata (top features, exemplar cases)
-- Interactive API documentation at `/docs` with schema validation
-
-### Docker Containerization
-
-- Optimized Docker image for production deployment
-- Health checks included
-- Ready for Amazon ECR deployment
-
-## Installation
-
-### Prerequisites
-
-- Python 3.10+
-- Docker (optional, for containerization)
-
-### Local Setup
-
-1. Clone the repository:
+See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.
 
 ```bash
+# Clone and setup
 git clone https://github.com/j2damax/hotel-cancellation-prediction.git
 cd hotel-cancellation-prediction
-```
-
-2. Create a virtual environment:
-
-```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Configure environment (optional):
-
-```bash
-# Copy environment template
-cp .env.example .env
-# Edit .env with your preferred settings (optional - defaults work fine)
-```
-
-4. Install dependencies:
-
-```bash
 pip install -r requirements.txt
+
+# Train models
+python scripts/train.py --cv-folds 5
+
+# Start API
+python main.py
+
+# Test
+curl http://localhost:8000/health
 ```
 
-## Usage
+## Training
 
-### Training Models
-
-Run the training script to train all models with MLflow tracking:
+Train all models with cross-validation:
 
 ```bash
-python scripts/train.py
+python scripts/train.py --cv-folds 5 --categorical-strategy target
 ```
 
-This will:
-
-- Load the hotel booking dataset (place real data in `data/raw/` if replacing sample)
-- Train 4 different models (LogReg, RF, XGBoost, PyTorch MLP)
-- Perform optional stratified cross-validation (if `--cv-folds` provided)
-- Select and persist a champion model (`models/champion_model.pkl`) with metadata
-- Generate diagnostic + interpretability artifacts (see Artifacts section below)
-- Log all experiments and runs to MLflow
-
-View MLflow UI to compare models:
+Or use the Makefile:
 
 ```bash
-mlflow ui
+make train              # Full CV training
+make fast-train ROWS=800  # Quick smoke test
+make mlflow             # Launch MLflow UI
 ```
 
-Then open http://localhost:5000 in your browser.
+The training pipeline will:
+- Train multiple models (LogisticRegression, RandomForest, XGBoost, PyTorch MLP)
+- Perform stratified K-fold cross-validation
+- Select champion model based on F1 score
+- Generate diagnostic artifacts (confusion matrix, ROC curves, SHAP plots)
+- Save champion model to `models/champion_model.pkl`
 
-### Makefile Convenience
+View experiments in MLflow UI:
 
-Common tasks (see `Makefile`):
-
-```
-make train                # Full CV training
-make fast-train ROWS=800  # Smoke test limited rows
-make api                  # Run API locally
-make mlflow               # Launch MLflow UI
-make export-latex         # (If added) run LaTeX export script
-make artifacts-status     # List artifact files
-make docker-build         # Build Docker image (IMAGE_TAG=git SHA)
-make docker-push REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com
-make docker-release REGISTRY=...  # Build + push (sha + latest)
+```bash
+mlflow ui  # Open http://localhost:5000
 ```
 
-### Fairness & LaTeX Utilities
-
-- `scripts/fairness_analysis.py` – exploratory subgroup metrics
-- `scripts/export_latex.py` – generate LaTeX tables into `report/latex/`
-
-### Running the API
+## API Usage
 
 Start the FastAPI server:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+python main.py  # or: uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Or run directly:
+Available endpoints:
+- **Root**: http://localhost:8000
+- **Docs**: http://localhost:8000/docs (interactive Swagger UI)
+- **Health**: http://localhost:8000/health
 
-```bash
-python main.py
-```
-
-Access the API:
-
-- API Root: http://localhost:8000
-- Interactive Docs: http://localhost:8000/docs
-- Health Check: http://localhost:8000/health
-
-### Testing the API
-
-Use the provided test client:
-
-```bash
-python scripts/test_api.py
-```
-
-Or make manual requests (see examples below).
-
-### Making Predictions
-
-Example using curl:
+### Make Predictions
 
 ```bash
 curl -X POST "http://localhost:8000/predict" \
@@ -264,72 +177,20 @@ print(response.json())
 
 ## Docker Deployment
 
-### Using Docker Compose (Recommended for Local Testing)
+See [DEPLOYMENT.md](DEPLOYMENT.md) for Hugging Face Space deployment.
 
-The easiest way to run the application locally with Docker:
-
-```bash
-# Start both API and MLflow UI
-docker-compose up
-
-# Or run in detached mode
-docker-compose up -d
-```
-
-This will start:
-
-- API server on http://localhost:8000
-- MLflow UI on http://localhost:5000
-
-To stop:
+**Using Docker Compose:**
 
 ```bash
-docker-compose down
+docker-compose up  # Start API (port 8000) and MLflow UI (port 5000)
 ```
 
-### Building the Docker Image
+**Using Docker:**
 
 ```bash
 docker build -t hotel-cancellation-prediction .
-```
-
-### Running the Container Locally
-
-```bash
 docker run -p 8000:8000 hotel-cancellation-prediction
 ```
-
-### Deploying to Amazon ECR
-
-For detailed instructions on deploying to AWS ECR and running on ECS, EKS, or App Runner, see [DEPLOYMENT.md](DEPLOYMENT.md).
-
-Quick start:
-
-1. Authenticate Docker to ECR:
-
-```bash
-aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
-```
-
-2. Create ECR repository (if not exists):
-
-```bash
-aws ecr create-repository --repository-name hotel-cancellation-prediction --region <region>
-```
-
-3. Tag the image:
-
-```bash
-docker tag hotel-cancellation-prediction:latest <account-id>.dkr.ecr.<region>.amazonaws.com/hotel-cancellation-prediction:latest
-```
-
-4. Push to ECR:
-
-```bash
-docker push <account-id>.dkr.ecr.<region>.amazonaws.com/hotel-cancellation-prediction:latest
-```
-
-5. Deploy to ECS, EKS, or other AWS services using the ECR image.
 
 ## Input Features
 
@@ -352,219 +213,57 @@ The model expects the following features for prediction:
 
 ## Model Performance
 
-After training, you can compare model performance in the MLflow UI. Metrics tracked include:
+Champion model is selected automatically via cross-validation (F1 score primary metric, ROC-AUC tie-break).
 
-- Accuracy
-- Precision
-- Recall
-- F1 Score
-- ROC AUC
+View metrics in:
+- `artifacts/champion_meta.json` - Champion model metadata and performance
+- `artifacts/cv_metrics.json` - Cross-validation results
+- MLflow UI - Experiment tracking and comparison
 
-### Current Champion (Most Recent Full Run)
+## Artifacts
 
-The latest full-data training run (timestamp 2025-10-05) selected **XGBoost** as champion via 5-fold stratified CV (primary metric F1, tie-break ROC-AUC).
+Training generates the following artifacts in `artifacts/`:
 
-Cross-Validation (mean ± std):
+| File | Description |
+|------|-------------|
+| `cv_metrics.json` | Cross-validation metrics |
+| `champion_meta.json` | Champion model metadata |
+| `confusion_matrix.png` | Performance visualization |
+| `roc_curve.json`, `pr_curve.json` | Curve data |
+| `threshold_sweep.csv` | Threshold tuning metrics |
+| `shap_summary.png` | Global SHAP plot |
+| `feature_importance.json` | Feature importance scores |
 
-- Accuracy: 0.8612 ± 0.0016
-- Precision: 0.8386 ± 0.0024
-- Recall: 0.7743 ± 0.0051
-- F1: 0.8052 ± 0.0028
-- ROC-AUC: 0.9376 ± 0.0010
+## Interpretability
 
-Holdout Metrics:
-
-- Accuracy: 0.8614
-- Precision: 0.8417
-- Recall: 0.7707
-- F1: 0.8047
-- ROC-AUC: 0.9384
-
-Optimal Operating Threshold (F1-oriented): 0.35 → Precision 0.7664 / Recall 0.8620 / F1 0.8114
-
-Artifacts: see `artifacts/champion_meta.json` and `artifacts/cv_metrics.json`.
-
-> NOTE: Champion is re-evaluated each training run; values above are point-in-time and will update after subsequent executions.
-
-## Cross-Validation & Champion Selection
-
-The training pipeline performs optional stratified K-fold cross-validation to robustly compare candidate models and automatically select a champion.
-
-### Running Cross-Validation
+Access model interpretability via the `/model/interpretability` endpoint or generated artifacts:
 
 ```bash
-python scripts/train.py --cv-folds 5
+curl http://localhost:8000/model/interpretability
 ```
 
-### Champion Selection Criteria
+Returns:
+- Champion model information
+- Top global features (SHAP importance)
+- Local explanation examples
+- Feature name mappings
 
-1. Primary: Highest `f1_score_mean`
-2. Tie-break: Highest `roc_auc_mean`
-3. Reported with mean ± std across folds
-
-### Key Artifacts
-
-- `artifacts/cv_metrics.json` – Per-fold + aggregate metrics (F1, ROC-AUC, precision, recall)
-- `artifacts/champion_meta.json` – Champion model name, metrics, selection rationale
-- `models/champion_model.pkl` – Persisted champion model
-
-### Example Metric Table (Illustrative Only)
-
-| Model | F1 (mean ± std) | ROC-AUC (mean ± std) | Precision | Recall |
-|-------|-----------------|----------------------|-----------|--------|
-| LogisticRegression | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
-| RandomForest | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
-| XGBoost | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
-| PyTorch_MLP | 0.xxx ± 0.xxx | 0.xxx ± 0.xxx | 0.xxx | 0.xxx |
-
-> Replace with values from your full-data run; above numbers are placeholders.
-
-## Interpretability & SHAP
-
-Model transparency is critical for both academic rigor and operational trust in the hospitality domain. We integrate SHAP (SHapley Additive exPlanations) to provide: (1) global feature importance, (2) per-booking local explanations, and (3) a human-readable feature name mapping.
-
-### Generated Interpretability Artifacts
-
-Produced automatically when a champion is finalized:
-
-- `artifacts/shap_summary.png` – Beeswarm (global impact distribution)
-- `artifacts/shap_importance_bar.png` – Top mean |SHAP| importance bar chart
-- `artifacts/feature_importance.json` – Mean absolute SHAP values (machine names)
-- `artifacts/shap_values_sample.json` – Sampled local explanations (true/false positive/negative exemplars)
-- `artifacts/feature_name_map.json` – Mapping to human-readable labels
-- `artifacts/threshold_sweep.csv` – Threshold vs. precision/recall/F1
-- `artifacts/classification_report.json` – Precision/recall/F1 by class
-- `artifacts/roc_curve.json`, `artifacts/pr_curve.json` – Curve coordinate data
-- `artifacts/confusion_matrix.png` – Visual confusion matrix
-
-### Top 10 Features (Sample Run)
-
-Example (LogisticRegression champion on a limited 800-row run):
-
-| Rank | Feature | Mean |SHAP| | Human Meaning |
-|------|---------|-------------|----------------|
-| 1 | country__te | 2.448 | Country (target encoded) |
-| 2 | assigned_room_type | 1.229 | Assigned room type code |
-| 3 | required_car_parking_spaces | 1.074 | Required car parking spaces |
-| 4 | reserved_room_type | 0.943 | Reserved room type code |
-| 5 | customer_type_target_encoded | 0.608 | Customer type (target encoded) |
-| 6 | distribution_channel_target_encoded | 0.458 | Distribution channel (target encoded) |
-| 7 | arrival_date_week_number | 0.416 | Week-of-year of arrival |
-| 8 | booking_changes | 0.384 | Number of booking modifications |
-| 9 | market_segment | 0.343 | Market segment raw category |
-| 10 | lead_time | 0.253 | Days between booking & arrival |
-
-> Values above are illustrative from a small sample run. For publication-quality reporting re-run on full dataset; SHAP magnitude ordering may shift slightly with more data and the final champion.
-
-### Local Explanation Examples
-
-From `shap_values_sample.json` (categories chosen: true_positive, false_positive, false_negative) – truncated illustration:
-
-```json
-{
-  "category": "true_positive",
-  "probability": 0.8560,
-  "top_positive_contributors": [
-    {"feature": "country__te", "shap": 2.1173},
-    {"feature": "assigned_room_type", "shap": 1.5004},
-    {"feature": "required_car_parking_spaces", "shap": 0.8191}
-  ],
-  "top_negative_contributors": [
-    {"feature": "reserved_room_type", "shap": -0.7972},
-    {"feature": "stays_in_weekend_nights", "shap": -0.4383},
-    {"feature": "arrival_date_day_of_month", "shap": -0.1705}
-  ]
-}
-```
-
-Interpretation (business context): The model increased cancellation probability primarily due to (a) encoded country signal, (b) an assigned room type differing from reservation (upgrade/downgrade friction), and (c) required parking (proxy for certain traveler segments). Weekend stays and specific reserved room characteristics slightly mitigated predicted risk.
-
-### Why SHAP?
-
-- Additive, locally accurate decomposition of prediction log-odds (for linear / tree models)
-- Consistent feature importance across heterogeneous model classes
-- Actionability: Revenue management and overbooking policies can target high-impact drivers (e.g., long lead time + specific channel + encoded country cluster)
-
-### Recomputing for Final Report
-
-Run on the full dataset (omit `--limit-rows`) to produce stable global rankings:
+## Makefile Commands
 
 ```bash
-python scripts/train.py --cv-folds 5 --categorical-strategy target
+make help             # Show all available commands
+make train            # Full CV training
+make fast-train ROWS=800  # Quick smoke test
+make api              # Start API server
+make mlflow           # Launch MLflow UI
+make test             # Run pytest
+make docker-build     # Build Docker image
+make docker-run       # Run container locally
 ```
-
-Use `feature_importance.json` + `champion_meta.json` for publication tables. Optionally convert to LaTeX.
-
-### Notes & Future Enhancements
-
-- Calibrated probabilities (Platt / isotonic) for better risk thresholds
-- Drift monitoring: compare future SHAP distributions vs. baseline to detect market shifts
-- Grouped importance (aggregate one-hot / target-encoded families) for cleaner reporting
-The `/model/interpretability` endpoint provides: champion metadata, top global features, local explanation exemplars, and feature name mapping.
-
----
-
-## Environment Configuration
-
-The application supports environment-based configuration through `.env` files:
-
-### Quick Setup
-
-```bash
-# Copy the template
-cp .env.example .env
-
-# Edit with your settings (optional - defaults work fine)
-# Common customizations:
-# API_PORT=8001               # Change API port
-# MLFLOW_UI_PORT=5002         # Change MLflow UI port
-# LOG_LEVEL=DEBUG             # Enable debug logging
-# TRAINING_DATA_SIZE=20000    # Larger training dataset
-```
-
-### Key Environment Variables
-
-- `API_PORT`: FastAPI server port (default: 8000)
-- `MLFLOW_UI_PORT`: MLflow UI port (default: 5001)
-- `MLFLOW_TRACKING_URI`: MLflow backend URI (default: file:./mlruns)
-- `MODEL_PATH`: Directory for saved models (default: models/)
-- `LOG_LEVEL`: Logging level (default: INFO)
-
-### Production Configuration
-
-For production deployments, set secure values in `.env`:
-
-```bash
-# Security
-API_KEY=your-secret-api-key
-JWT_SECRET=your-jwt-secret
-
-# AWS Configuration
-AWS_REGION=us-east-1
-AWS_ACCOUNT_ID=123456789012
-ECR_REPOSITORY_NAME=hotel-cancellation-prediction
-
-# Performance
-MAX_WORKERS=8
-BATCH_SIZE=200
-```
-
-## Dependencies
-
-See `requirements.txt` for complete list. Key dependencies:
-
-- pandas >= 2.0.0
-- scikit-learn >= 1.3.0
-- xgboost >= 2.0.0
-- torch >= 2.0.0
-- mlflow >= 2.9.0
-- fastapi >= 0.104.0
-- uvicorn >= 0.24.0
-- python-dotenv >= 1.0.0
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see LICENSE file for details.
 
 ## Author
 
@@ -572,67 +271,4 @@ Jayampathy Balasuriya
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Training CLI Options
-
-The `scripts/train.py` script supports several optional arguments (inspect `--help` for the authoritative list):
-
-- `--cv-folds INT` – Enable stratified K-fold cross-validation
-- `--limit-rows INT` – Use only the first N rows (smoke tests / fast iteration)
-- `--categorical-strategy {onehot,target,drop}` – Encoding strategy
-- `--max-shap-samples INT` – (If implemented) Cap rows used for SHAP to control runtime
-
-## Produced Artifacts (Summary)
-
-| Artifact | Purpose |
-|----------|---------|
-| `artifacts/cv_metrics.json` | Cross-validation metrics per model + aggregates |
-| `artifacts/champion_meta.json` | Champion model identity + selection rationale |
-| `models/champion_model.pkl` | Persisted champion model for inference |
-| `artifacts/confusion_matrix.png` | Visual performance diagnostic |
-| `artifacts/roc_curve.json` / `pr_curve.json` | Curve data for reproducible plots |
-| `artifacts/threshold_sweep.csv` | Threshold tuning metrics grid |
-| `artifacts/classification_report.json` | Precision/Recall/F1 per class |
-| `artifacts/shap_summary.png` | Global SHAP beeswarm plot |
-| `artifacts/shap_importance_bar.png` | Ranked SHAP feature importances |
-| `artifacts/feature_importance.json` | Structured global SHAP stats |
-| `artifacts/shap_values_sample.json` | Local explanation exemplars |
-| `artifacts/feature_name_map.json` | Human-readable labels for features |
-
-## Readiness Checklist
-
-Use this before producing final academic or deployment results:
-
-1. Data present in `data/raw/` (expected rows & target distribution validated)
-2. Run full training (no `--limit-rows`):
-  ```bash
-  python scripts/train.py --cv-folds 5 --categorical-strategy target
-  ```
-3. Confirm artifacts directory contains all files listed above
-4. Inspect `champion_meta.json` – champion identity & metrics reasonable
-5. Optional: Tune decision threshold using `threshold_sweep.csv`
-6. Start API & verify endpoints:
-  ```bash
-  uvicorn main:app --port 8000
-  curl localhost:8000/health
-  curl localhost:8000/model/interpretability
-  ```
-7. Run tests:
-  ```bash
-  pytest -q
-  ```
-8. Launch MLflow UI and capture comparative metrics screenshot (for report)
-9. Archive artifact visuals (confusion matrix, SHAP plots) for appendix
-10. (Deployment) Build & push Docker image or run `docker-compose up` locally
-
-## Future Enhancements
-
-- Probability calibration (Platt / isotonic) for improved decision thresholds
-- Drift monitoring via periodic SHAP distribution comparison
-- Grouped feature attribution (aggregate encoded categories)
-- Automated LaTeX export of metrics & importance tables
-- Optional calibration & fairness diagnostics modules
-
----
-Updated: 2025-10-05
+Contributions are welcome! Please submit a Pull Request.

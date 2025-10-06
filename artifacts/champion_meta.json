@@ -15,7 +15,7 @@
     "roc_auc_std": 0.0010218562950094605
   },
   "cv_folds": 5,
-  "timestamp": "2025-10-05T02:15:45.321360+00:00",
+  "timestamp": "2025-10-05T12:26:19.676359+00:00",
   "notes": "Model will be (re)trained on training split below; final persisted champion artifact occurs after training.",
   "persisted_path": "models/champion_model.pkl",
   "holdout_metrics": {
@@ -25,14 +25,25 @@
     "f1_score": 0.8046506137865911,
     "roc_auc": 0.9384035807110922
   },
-  "holdout_timestamp": "2025-10-05T02:16:53.000014+00:00",
+  "holdout_timestamp": "2025-10-05T16:43:04.352749+00:00",
   "decision_threshold": 0.35000000000000003,
   "decision_threshold_metrics": {
     "precision": 0.7663852030558906,
     "recall": 0.8619559072922555,
     "f1_score": 0.811365934124408
   },
-  "diagnostics_generated": "2025-10-05T02:16:54.555525+00:00",
+  "diagnostics_generated": "2025-10-05T16:43:06.126491+00:00",
   "shap_generated": true,
-  "shap_timestamp": "2025-10-05T02:16:58.494308+00:00"
+  "shap_timestamp": "2025-10-05T16:43:10.217872+00:00",
+  "library_versions": {
+    "python": "3.12.7",
+    "pandas": "2.3.3",
+    "numpy": "2.3.3",
+    "sklearn": "1.7.2",
+    "xgboost": "3.0.5",
+    "torch": "2.8.0",
+    "mlflow": "3.4.0",
+    "shap": "0.48.0",
+    "fastapi": "0.118.0"
+  }
 }

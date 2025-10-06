@@ -11,6 +11,10 @@ services:
       - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-file:./mlruns}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MODEL_TYPE=${MODEL_TYPE:-xgboost}
+      - MODEL_S3_URI=s3://hotel-cancel-models-dev/models
+      - MODEL_VERSION=latest
+      - AWS_REGION=us-east-1
+      - DECISION_THRESHOLD="0.35"
     env_file:
       - .env
     volumes:
