@@ -67,11 +67,17 @@ COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY main.py ./
 COPY app ./app
+COPY src ./src
+# Create directories for HuggingFace model downloads
+RUN mkdir -p artifacts models
+# Create non-root user for security
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
 EXPOSE 7860
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
 ```
 
-Note: Hugging Face Spaces use port 7860.
+Note: Hugging Face Spaces use port 7860. The `models` directory is required for downloading artifacts from HuggingFace Hub at runtime.
 
 ### 5. Commit and Deploy
 
@@ -108,6 +114,7 @@ For Docker Spaces, you may need `/proxy/` in the path.
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | 503 model_not_loaded | Missing `HF_MODEL_REPO` | Add environment variable |
+| Permission denied: 'models' | Missing models directory in Docker | Ensure Dockerfile creates `models/` before switching to non-root user |
 | InconsistentVersionWarning | Version mismatch | Pin `scikit-learn==1.7.2` |
 | 500 preprocessor error | Code drift | Align preprocessing logic |
 | Slow first request | Cold start | Normal; subsequent requests faster |
