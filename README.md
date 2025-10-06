@@ -282,6 +282,15 @@ If `HF_MODEL_REPO` is provided the loader attempts: local artifacts (unless `FOR
 
 This project no longer uses AWS / S3 for model artifacts; all related environment variables and code paths were removed. If any historical AWS credentials were exposed, rotate them immediately in your cloud provider console. Avoid committing secrets—use platform secret managers or Hugging Face Space Secrets UI.
 
+### Credential Rotation Checklist (if prior AWS keys leaked)
+
+1. Log into AWS IAM and mark exposed access keys as inactive.
+2. Create new access keys only if still required for other systems.
+3. Invalidate any temporary session tokens.
+4. Audit CloudTrail for misuse during exposure window.
+5. Remove obsolete keys from password managers / CI variables.
+6. Document the rotation (timestamp, actor, rationale) for future audits.
+
 ## License
 
 MIT License - see LICENSE file for details.
