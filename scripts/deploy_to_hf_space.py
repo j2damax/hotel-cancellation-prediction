@@ -151,23 +151,25 @@ Check `/docs` for the interactive API documentation.
     # 8. Create Dockerfile for Spaces
     dockerfile_content = """FROM python:3.10-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install system dependencies (minimal)
+# Install system dependencies (minimal) & Python deps as root so console scripts land in /usr/local/bin
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user & cache dirs
-RUN useradd -m appuser \
-    && mkdir -p /app/models /app/artifacts /app/hf-cache \
-    && chown -R appuser:appuser /app
-USER appuser
-
-# Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
+
+# Create non-root user & cache dirs AFTER deps so uvicorn already on PATH
+RUN useradd -m appuser \
+    && mkdir -p /app/models /app/artifacts /app/hf-cache \
+    && chown -R appuser:appuser /app /home/appuser
+USER appuser
 
 # Copy application files
 COPY . .
@@ -179,8 +181,8 @@ EXPOSE 7860
 ENV PORT=7860 \
     HF_HUB_CACHE=/app/hf-cache
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Run the application (python -m form removes reliance on entrypoint script PATH issues)
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
 """
     (staging_dir / "Dockerfile").write_text(dockerfile_content)
     print("✓ Created Dockerfile")
