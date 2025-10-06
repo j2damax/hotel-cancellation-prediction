@@ -1,5 +1,9 @@
 # Hotel Cancellation Prediction
 
+[![CI](https://github.com/j2damax/hotel-cancellation-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/j2damax/hotel-cancellation-prediction/actions/workflows/ci.yml)
+[![Model Publish](https://github.com/j2damax/hotel-cancellation-prediction/actions/workflows/model-publish.yml/badge.svg)](https://github.com/j2damax/hotel-cancellation-prediction/actions/workflows/model-publish.yml)
+[![Space Deploy](https://github.com/j2damax/hotel-cancellation-prediction/actions/workflows/space-deploy.yml/badge.svg)](https://github.com/j2damax/hotel-cancellation-prediction/actions/workflows/space-deploy.yml)
+
 A machine learning pipeline for predicting hotel booking cancellations with multiple models, MLflow tracking, and FastAPI REST API.
 
 ## Project Structure
@@ -302,3 +306,15 @@ Jayampathy Balasuriya
 ## Contributing
 
 Contributions are welcome! Please submit a Pull Request.
+
+## CI / CD Workflows
+
+| Workflow | Purpose | Trigger(s) | Required Secrets / Vars |
+|----------|---------|-----------|--------------------------|
+| CI | Run unit tests (pytest) on pushes & PRs | push (main, chore/**, feature/**), PR to main | (none required) |
+| Model Publish | Fast training + push champion artifacts to HF Hub | tag push v*.*.* or manual dispatch | secrets.HF_TOKEN, vars.HF_MODEL_REPO |
+| Space Deploy | Deploy FastAPI app to Hugging Face Space | after successful Model Publish, tag push, manual dispatch | secrets.HF_TOKEN, vars.HF_SPACE_ID |
+
+Set repository or org variables: `HF_MODEL_REPO`, `HF_SPACE_ID`. Add secret: `HF_TOKEN` (a write token from your HF account).
+
+For manual dispatch you can override repo / space IDs and force remote model load.

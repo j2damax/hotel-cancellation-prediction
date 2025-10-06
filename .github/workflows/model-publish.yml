@@ -1,0 +1,94 @@
+name: Model Publish
+
+# Required:
+#   secrets.HF_TOKEN  -> Write token for Hugging Face Hub
+# Recommended repo/org variables:
+#   HF_MODEL_REPO     -> e.g. j2damax/hotel-cancel-model (used if workflow input not provided)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_id:
+        description: "Target HF model repo (overrides default)"
+        required: false
+      force_readme:
+        type: boolean
+        description: "Overwrite model card README.md"
+        default: false
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO }}
+
+jobs:
+  train-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system deps (xgboost build)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fast feature engineering (if needed)
+        run: |
+          if [ ! -f data/processed/hotel_booking_features.csv ]; then \
+             echo 'Features missing, running preprocessing + feature engineering'; \
+             python scripts/preprocessing.py --limit-rows 500 || true; \
+             python scripts/feature_engineering.py --limit-rows 500 || true; \
+          else \
+             echo 'Using existing engineered features'; \
+          fi
+
+      - name: Train models (fast CV)
+        run: |
+          python scripts/train.py --cv-folds 3 --limit-rows 1500 --categorical-strategy target || \
+          python scripts/train.py --cv-folds 1 --limit-rows 1500 --categorical-strategy drop
+
+      - name: Determine repo id
+        id: repoid
+        run: |
+          RID="${{ github.event.inputs.repo_id }}"
+          if [ -z "$RID" ]; then
+            RID="$DEFAULT_HF_MODEL_REPO"
+          fi
+          if [ -z "$RID" ]; then
+            echo '::error::HF model repo id not provided. Set workflow input or org/repo variable HF_MODEL_REPO.'
+            exit 1
+          fi
+          echo "repo_id=$RID" >> $GITHUB_OUTPUT
+
+      - name: Push model + artifacts to HF Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then echo '::error::HF_TOKEN secret not set'; exit 1; fi
+          FORCE_README=""
+          if [ "${{ github.event.inputs.force_readme }}" = 'true' ]; then FORCE_README="--force-readme"; fi
+          python scripts/push_to_hf.py --repo-id "${{ steps.repoid.outputs.repo_id }}" $FORCE_README
+
+      - name: Upload champion artifacts (for provenance)
+        uses: actions/upload-artifact@v4
+        with:
+          name: champion-artifacts
+          path: |
+            models/champion_model.pkl
+            models/preprocessor.pkl
+            artifacts/champion_meta.json

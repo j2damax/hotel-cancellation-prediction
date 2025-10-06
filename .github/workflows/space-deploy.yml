@@ -1,0 +1,75 @@
+name: Space Deploy
+
+# Required:
+#   secrets.HF_TOKEN  -> Write token for Hugging Face Hub (Space deploy)
+# Recommended repo/org variables:
+#   HF_SPACE_ID       -> e.g. j2damax/boking-cancelation-api (used if workflow input not provided)
+# Optional:
+#   HF_MODEL_REPO     -> If you want to embed model repo into .env via dispatch input
+
+on:
+  workflow_dispatch:
+    inputs:
+      space_id:
+        description: "Space ID (e.g. user/space-name) override"
+        required: false
+      hf_model_repo:
+        description: "Optional HF model repo to inject into .env"
+        required: false
+      force_hf_load:
+        type: boolean
+        description: "Force remote HF model load (FORCE_HF_LOAD=true)"
+        default: false
+  workflow_run:
+    workflows: ["Model Publish"]
+    types: ["completed"]
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_SPACE_ID: ${{ vars.HF_SPACE_ID }}
+
+jobs:
+  deploy:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies (subset)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve Space ID
+        id: space
+        run: |
+          SID="${{ github.event.inputs.space_id }}"
+          if [ -z "$SID" ]; then SID="$DEFAULT_SPACE_ID"; fi
+          if [ -z "$SID" ]; then echo '::error::Space ID not provided. Set workflow input or org/repo variable HF_SPACE_ID.'; exit 1; fi
+          echo "space_id=$SID" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then echo '::error::HF_TOKEN secret not set'; exit 1; fi
+          EXTRA=""
+          if [ "${{ github.event.inputs.force_hf_load }}" = 'true' ]; then EXTRA="$EXTRA --force-hf-load"; fi
+          if [ ! -z "${{ github.event.inputs.hf_model_repo }}" ]; then EXTRA="$EXTRA --hf-model-repo ${{ github.event.inputs.hf_model_repo }}"; fi
+          python scripts/deploy_to_hf_space.py --space-id "${{ steps.space.outputs.space_id }}" $EXTRA --token $HF_TOKEN
+
+      - name: Summary
+        run: echo "Deployment triggered for space ${{ steps.space.outputs.space_id }}"
