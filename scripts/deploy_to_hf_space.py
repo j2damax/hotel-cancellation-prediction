@@ -153,14 +153,20 @@ Check `/docs` for the interactive API documentation.
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \\
-    build-essential \\
+# Install system dependencies (minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user & cache dirs
+RUN useradd -m appuser \
+    && mkdir -p /app/models /app/artifacts /app/hf-cache \
+    && chown -R appuser:appuser /app
+USER appuser
 
 # Copy requirements and install
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \\
+RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
@@ -169,8 +175,9 @@ COPY . .
 # Expose port 7860 (Hugging Face Spaces default)
 EXPOSE 7860
 
-# Set environment variable for Hugging Face Spaces
-ENV PORT=7860
+# Environment (HF cache path can be overridden at runtime)
+ENV PORT=7860 \
+    HF_HUB_CACHE=/app/hf-cache
 
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
@@ -186,6 +193,12 @@ ARTIFACT_DIR=artifacts
 LOCAL_MODEL_PATH=models/champion_model.pkl
 LOCAL_PREPROCESSOR_PATH=models/preprocessor.pkl
 ALLOW_START_WITHOUT_MODEL=false
+# Hugging Face model repository (set in Space variables if remote load desired)
+# HF_MODEL_REPO=j2damax/hotel-cancel-model
+# Force remote load even if local artifacts exist
+# FORCE_HF_LOAD=false
+# Optional custom hub cache inside container (overrides Dockerfile default)
+# HF_HUB_CACHE=/app/hf-cache
 """
     (staging_dir / ".env").write_text(env_content)
     print("✓ Created .env")
@@ -286,6 +299,16 @@ def main():
         action="store_true",
         help="Skip clearing the space before deployment"
     )
+    parser.add_argument(
+        "--force-hf-load",
+        action="store_true",
+        help="Write FORCE_HF_LOAD=true into generated .env (forces remote model load)"
+    )
+    parser.add_argument(
+        "--hf-model-repo",
+        default=None,
+        help="Embed HF_MODEL_REPO into .env (e.g. j2damax/hotel-cancel-model)"
+    )
     
     args = parser.parse_args()
     
@@ -299,6 +322,28 @@ def main():
         print("⚠ No token provided. Attempting to use cached credentials...")
         print("  Run 'huggingface-cli login' if authentication fails.")
     
+    # If user supplied flags for remote model settings, append to .env after staging is built
+    # Easiest: run deployment, then rely on Space variables; but if provided we patch the staged .env.
+    def _inject_env(staging_root: Path):
+        env_file = staging_root / '.env'
+        if env_file.exists():
+            extra_lines = []
+            if args.hf_model_repo:
+                extra_lines.append(f"HF_MODEL_REPO={args.hf_model_repo}\n")
+            if args.force_hf_load:
+                extra_lines.append("FORCE_HF_LOAD=true\n")
+            if extra_lines:
+                with open(env_file,'a') as ef:
+                    ef.write('\n' + ''.join(extra_lines))
+                print("✓ Injected remote model settings into .env")
+
+    # Wrap original deploy to intercept staging directory
+    orig_prepare = prepare_space_files
+    def wrapped_prepare(staging_dir: Path, repo_root: Path):
+        orig_prepare(staging_dir, repo_root)
+        _inject_env(staging_dir)
+    globals()['prepare_space_files'] = wrapped_prepare
+
     # Deploy
     deploy_to_space(
         space_id=args.space_id,
