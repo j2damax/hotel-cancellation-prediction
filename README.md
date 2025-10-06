@@ -261,6 +261,27 @@ make docker-build     # Build Docker image
 make docker-run       # Run container locally
 ```
 
+## Environment Variables
+
+Key runtime configuration via environment variables (can be placed in `.env`):
+
+| Variable | Required | Purpose | Example |
+|----------|----------|---------|---------|
+| `HF_MODEL_REPO` | Optional | Hugging Face model repo id to pull artifacts from; if unset uses baked local `models/` | `j2damax/hotel-cancel-model` |
+| `FORCE_HF_LOAD` | Optional | If `true`, always pull from HF even when local artifacts exist (useful for fresh snapshots) | `true` |
+| `HF_HUB_CACHE` | Optional | Override cache dir for HF downloads (default hub cache) | `/app/hf-cache` |
+| `ALLOW_START_WITHOUT_MODEL` | Optional | Start API even if model load fails (health returns `model_not_loaded`) | `true` |
+| `DECISION_THRESHOLD` | Optional | Override probability threshold for positive prediction | `0.42` |
+| `MODEL_VERSION` | Informational | Tag/version label for baked artifacts | `latest` |
+| `LOG_LEVEL` | Optional | Logging verbosity | `INFO` |
+| `MLFLOW_TRACKING_URI` | Optional | MLflow backend URI (for training flows) | `file:./mlruns` |
+
+If `HF_MODEL_REPO` is provided the loader attempts: local artifacts (unless `FORCE_HF_LOAD=true`) then Hugging Face snapshot. Set `ALLOW_START_WITHOUT_MODEL=true` for cold starts in ephemeral environments while the model downloads.
+
+## Security & Credential Hygiene
+
+This project no longer uses AWS / S3 for model artifacts; all related environment variables and code paths were removed. If any historical AWS credentials were exposed, rotate them immediately in your cloud provider console. Avoid committing secrets—use platform secret managers or Hugging Face Space Secrets UI.
+
 ## License
 
 MIT License - see LICENSE file for details.

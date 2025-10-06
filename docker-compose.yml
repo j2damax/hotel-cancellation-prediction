@@ -11,10 +11,13 @@ services:
       - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-file:./mlruns}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MODEL_TYPE=${MODEL_TYPE:-xgboost}
-      - MODEL_S3_URI=s3://hotel-cancel-models-dev/models
       - MODEL_VERSION=latest
-      - AWS_REGION=us-east-1
-      - DECISION_THRESHOLD="0.35"
+      - DECISION_THRESHOLD=${DECISION_THRESHOLD:-0.35}
+      # Hugging Face remote model loading (optional)
+      - HF_MODEL_REPO=${HF_MODEL_REPO:-}
+      - FORCE_HF_LOAD=${FORCE_HF_LOAD:-false}
+      - HF_HUB_CACHE=${HF_HUB_CACHE:-}
+      - ALLOW_START_WITHOUT_MODEL=${ALLOW_START_WITHOUT_MODEL:-false}
     env_file:
       - .env
     volumes:

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Deploy the Hotel Cancellation Prediction API as a Hugging Face Space.
+Deploy the Hotel Cancellation Prediction API as a Hugging Face Space (recommended) using baked local artifacts or dynamic loading from a Hugging Face model repository.
 
 ## Overview
 
@@ -8,9 +8,10 @@ The API can be deployed as a Hugging Face Space (FastAPI or Docker Space) that d
 
 ## Prerequisites
 
-- Hugging Face account
-- Model repository with artifacts: `champion_model.pkl`, `preprocessor.pkl`, `champion_meta.json`
-- (Optional) Additional SHAP and interpretability artifacts
+* Hugging Face account
+* (Option A) Baked artifacts: copy `models/champion_model.pkl`, `models/preprocessor.pkl`, `artifacts/champion_meta.json`
+* (Option B) Remote artifacts: Publish a model repo containing at least `champion_model.pkl`, `preprocessor.pkl`, `champion_meta.json` and set `HF_MODEL_REPO`
+* (Optional) SHAP / interpretability artifacts for richer `/model/interpretability`
 
 ## Deployment Steps
 
@@ -50,12 +51,15 @@ Add `torch` only if using PyTorch MLP model.
 
 ### 3. Configure Environment Variables
 
-In Space settings (Variables & secrets):
+Set in Space settings (Variables & secrets). Only `HF_MODEL_REPO` is needed for remote model loading; otherwise artifacts must be baked into `models/`.
 
-```
-HF_MODEL_REPO=<username>/hotel-cancel-champion  # Required
-DECISION_THRESHOLD=0.42                         # Optional
-```
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `HF_MODEL_REPO` | Optional | Remote model repo id (`namespace/repo`) for dynamic snapshot download |
+| `FORCE_HF_LOAD` | Optional | Force re-download even if baked artifacts exist (e.g. `true`) |
+| `HF_HUB_CACHE` | Optional | Override hub cache path (e.g. `/home/user/.cache/hf`) |
+| `DECISION_THRESHOLD` | Optional | Probability threshold override |
+| `ALLOW_START_WITHOUT_MODEL` | Optional | Allow API to start while model unavailable |
 
 ### 4. (Optional) Dockerfile for Docker Space
 
@@ -77,7 +81,10 @@ EXPOSE 7860
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
 ```
 
-Note: Hugging Face Spaces use port 7860. The `models` directory is required for downloading artifacts from HuggingFace Hub at runtime.
+Notes:
+1. Hugging Face Spaces expose port 7860.
+2. When using remote artifacts ensure the container user has write permission to the HF cache directory.
+3. For faster cold starts bake artifacts directly in the image instead of remote loading.
 
 ### 5. Commit and Deploy
 
@@ -106,8 +113,9 @@ For Docker Spaces, you may need `/proxy/` in the path.
 ## Updating Model
 
 1. Retrain locally: `python scripts/train.py`
-2. Push artifacts: `python scripts/push_to_hf.py`
-3. Restart Space or push a commit to trigger refresh
+2. Optionally push artifacts to HF: `python scripts/push_to_hf.py --repo <username>/<repo>`
+3. Trigger Space rebuild (commit any change or restart in UI)
+4. If using `FORCE_HF_LOAD=true`, revert to `false` after confirming new snapshot
 
 ## Troubleshooting
 
@@ -121,9 +129,9 @@ For Docker Spaces, you may need `/proxy/` in the path.
 
 ## Security
 
-- Never commit secrets
-- Use Space secrets UI for sensitive variables
-- Make model repo private if needed
+* Never commit secrets. This project has removed prior AWS / S3 variables; do not reintroduce them.
+* Use Space Secrets for sensitive values if future auth is added.
+* Rotate any historically exposed credentials externally—removal from repository history does not invalidate them.
 
 ## Local Testing
 
@@ -137,15 +145,10 @@ curl localhost:8000/health
 
 ## Alternative Deployment
 
-The containerized application can be deployed to any platform supporting Docker:
+Any Docker-capable platform (Kubernetes, Cloud Run, Azure App Service, Fly.io, Render, etc.) works. Key points:
+1. Artifacts strategy: bake vs remote HF snapshot
+2. Health probes: use `/health` (returns `model_not_loaded` until artifacts are ready)
+3. Config via environment variables (see table above)
+4. Scale: ensure sufficient memory for model + preprocessing pipeline (typically < 512MB for current baseline)
 
-- Kubernetes
-- Cloud Run (GCP)
-- App Service (Azure)
-- Fargate (AWS)
-- Fly.io, Render, etc.
-
-Key considerations:
-1. Artifacts: Bake into image or load from Hugging Face Hub at startup
-2. Expose `/health` endpoint for health checks
-3. Use environment variables for configuration
+For more Space-specific guidance see `HUGGINGFACE_DEPLOYMENT.md`.

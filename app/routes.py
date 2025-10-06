@@ -178,7 +178,7 @@ async def predict_batch(bookings: list[BookingFeatures]):
 def startup_load():
     model_loader.load_model()
     if model_loader.model is None and not config.ALLOW_START_WITHOUT_MODEL:
-        raise RuntimeError('Model not loaded at startup. Provide S3 env or mount local artifacts.')
+        raise RuntimeError('Model not loaded at startup. Provide HF_MODEL_REPO or bake local artifacts (set ALLOW_START_WITHOUT_MODEL=true to bypass).')
 
 
 @router.get('/model/interpretability')
